@@ -1,0 +1,26 @@
+# Training configs
+model_run: model_run_name
+
+# Directories
+train_dir: 
+val_dir:
+test_dir:
+output_dir:
+
+# Model parameters
+model_name:
+weight_decay:
+filter_bias_and_bn: True
+num_classes:
+input_channels:
+encoder_name:
+encoder_depth: 5
+
+# Optimizer
+optim_name:
+lr:
+momentum:
+beta1:
+beta2:
+nesterov: True
+
