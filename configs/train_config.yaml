@@ -1,20 +1,17 @@
 # Training configs
 model_run: model_run_name
 
-# Directories
-train_dir: 
-val_dir:
-test_dir:
-output_dir:
+images:
+  input_channels: 3
+  resize: [1024, 1024]
 
-# Model parameters
-model_name:
-weight_decay:
-filter_bias_and_bn: True
-num_classes:
-input_channels:
-encoder_name:
-encoder_depth: 5
+# Directories
+directories:
+  train_labeled_dir: data/raw/labeled
+  train_unlabeled_dir: data/raw/labeled
+  val_dir:
+  test_dir:
+  output_dir:
 
 # Optimizer
 optim_name:
@@ -24,3 +21,20 @@ beta1:
 beta2:
 nesterov: True
 
+# Flexmatch
+flexmatch:
+  tau: 0.95
+  mapping: linear
+  warmup: True
+
+# Model Architecture
+model:
+  architecture: DeepLabV3
+  config:
+    encoder_name: resnet18
+    encoder_depth: 5
+    encoder_weights: imagenet
+    input_channels: 3
+    classes: 5
+  weight_decay:
+  filter_bias_and_bn: True
