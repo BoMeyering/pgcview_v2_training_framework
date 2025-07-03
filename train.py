@@ -14,7 +14,7 @@ from omegaconf import OmegaConf
 # Local imports
 from src.models import create_smp_model
 from src.datasets import LabeledDataset, UnlabeledDataset
-from src.class_threshold import class_beta
+from src.flexmatch import class_beta
 from src.trainer import SupervisedTrainer, FlexMatchTrainer
 from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms
 

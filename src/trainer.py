@@ -22,9 +22,9 @@ import numpy as np
 from typing import Union
 from torch.utils.tensorboard import SummaryWriter
 from src.eval import AverageMeterSet
-# from src.fixmatch import get_pseudo_labels
+from src.flexmatch import get_pseudo_labels
 # from src.callbacks import ModelCheckpoint
-# from src.metrics import MetricLogger
+from src.metrics import MetricLogger
 from src.transforms import get_strong_transforms
 
 
@@ -93,12 +93,12 @@ class FlexMatchTrainer(Trainer):
         self.class_map = class_map
         self.transforms = get_strong_transforms(resize=args.model.resize)
 
-        try:
-            self.rank = dist.get_rank()
-        except ValueError:
-            self.rank = 0
-        except RuntimeError:
-            self.rank = 0
+        # try:
+        #     self.rank = dist.get_rank()
+        # except ValueError:
+        #     self.rank = 0
+        # except RuntimeError:
+        #     self.rank = 0
 
         # setup metrics class
         self.train_metrics = MetricLogger(
@@ -108,8 +108,8 @@ class FlexMatchTrainer(Trainer):
             num_classes=args.model.num_classes, device=args.device
         )
 
-        chkpt_path = Path(self.args.directories.chkpt_dir) / self.args.run_name
-        self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.args))
+        # chkpt_path = Path(self.args.directories.chkpt_dir) / self.args.run_name
+        # self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.args))
 
     def _train_step(self, batch: Tuple):
         "Train on one batch of labeled and unlabeled images."
@@ -418,9 +418,9 @@ class FlexMatchTrainer(Trainer):
                 "model_state_dict": self.model.state_dict(),
             }
 
-            self.logger.info(f"Epoch {logs['epoch'] + 1} Avg Loss, Train Loss: {logs['train_loss'].item()}, Val Loss: {logs['val_loss'].item()}")
+            # self.logger.info(f"Epoch {logs['epoch'] + 1} Avg Loss, Train Loss: {logs['train_loss'].item()}, Val Loss: {logs['val_loss'].item()}")
             
-            self.checkpoint(epoch=epoch, logs=logs)
+            # self.checkpoint(epoch=epoch, logs=logs)
 
 class SupervisedTrainer(Trainer):
     def __init__(

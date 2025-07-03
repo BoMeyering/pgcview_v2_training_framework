@@ -14,34 +14,68 @@ from typing import Iterable, Optional
 import torch.distributed as dist
 
 class InfiniteSampler(Sampler):
+    """ Infinite Sampler for a torch.utils.data.Dataloader """
     def __init__(self, dataset: torch.utils.data.Dataset):
         self.indices = list(range(len(dataset)))
         self.dataset = dataset
 
     def __iter__(self):
+        """ Iterate through the dataloader by wrapping the shuffled indices """
         random.shuffle(self.indices)
         while True:
             for i in self.indices:
                 yield i % len(self.indices)
 
     def __len__(self):
+        """ Return the length of the data """
         return len(self.dataset)
 
 class DataLoaderBalancer:
+    """
+    Takes an arbitrary number of datasets with corresponding batch sizes
+    Balances them all to the length of the longest dataset using an InfiniteSampler
+    
+    Methods:
+        balance_loaders: Returns a list of dataloaders, and the length of the longest dataloader
+    """
     def __init__(self, *datasets, batch_sizes: Iterable[int, ], drop_last: bool=True):
+        """
+        Initialize the dataloader balancer
+
+        Args:
+            *datasets (Iterable[Dataset, ]): Any iterable containing elements of type torch.utils.data.Dataset.
+            batch_sizes (Iterable[int, ]): Any iterable containing elements of type int.
+            drop_last (bool, optional): Whether to drop the last batch if not full. Defaults to True.
+
+        Raises:
+            ValueError: If the number of datasets is not the same as the number of batch_size elements.
+            ValueError: If a dataset has fewer elements than its corresponding batch size.
+            ValueError: If there is one or more negative elements in 'batch_sizes'.
+            ValueError: If there is one or more elements in 'batch_sizes' that is not an integer.
+        """
+        
         self.datasets = datasets
         self.batch_sizes = batch_sizes
         self.drop_last = drop_last
         
+        # Create empty dataloader and length lists
         self.dl_lengths = []
         self.dataloaders = []
 
+        # Quality checks for datasets
         if len(self.datasets) != len(self.batch_sizes):
             raise ValueError("The number of datasets does not equal the number of batch sizes. Please ammend appropriately")
         for i, (ds, bs) in enumerate(zip(self.datasets, self.batch_sizes)):
             if len(ds) < bs:
                 raise ValueError(f"Dataset {i+1} has fewer elements than its specified batch size. Please select a batch size smaller than {bs} and try again.")
 
+        # Quality checks for batch sizes
+        if any([i < 0 for i in batch_sizes]):
+            raise ValueError(f"One of the batch sizes has a negative element. Please ensure that all batch sizes are positive integers.")
+        elif any([type(i) != int for i in batch_sizes]):
+            raise ValueError(f"One or more of the batch sizes is not an integer. Please ensure that all batch sizes are positive integers.")
+
+        # Enforce correct dataloader lengths
         if drop_last:
             for i, ds in enumerate(self.datasets):
                 self.dl_lengths.append(len(ds) // self.batch_sizes[i])
@@ -49,6 +83,7 @@ class DataLoaderBalancer:
             for i, ds in enumerate(self.datasets):
                 self.dl_lengths.append(math.ceil(len(ds) / self.batch_sizes[i]))
 
+        # Grab the index for the longest dataloader
         self.max_idx = np.argmax(self.dl_lengths)
                 
     def balance_loaders(self):

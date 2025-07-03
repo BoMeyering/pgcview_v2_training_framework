@@ -161,5 +161,9 @@ cython_debug/
 
 data/PGCView_v2
 data/raw/all_images
+data/raw/labeled
+data/processed/**/*.jpg
+data/processed/**/*.jpeg
+data/processed/**/*.png
 *.insyncdl
 .VSCodeCounter

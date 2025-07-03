@@ -7,8 +7,8 @@ images:
 
 # Directories
 directories:
-  train_labeled_dir: data/raw/labeled
-  train_unlabeled_dir: data/raw/labeled
+  train_labeled_dir: data/processed/train/labeled
+  train_unlabeled_dir: data/processed/train/unlabeled
   val_dir:
   test_dir:
   output_dir:

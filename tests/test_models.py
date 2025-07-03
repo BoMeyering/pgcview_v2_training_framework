@@ -1,5 +1,5 @@
 """
-tests.test_modesl.py
+tests.test_models.py
 models.py unit tests
 BoMeyering 2025
 """
