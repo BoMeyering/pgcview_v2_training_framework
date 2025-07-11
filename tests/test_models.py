@@ -31,6 +31,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_unet(self):
+        """ Test Create Unet """
         self.conf.model.architecture = 'Unet'
         model = create_smp_model(self.conf)
 
@@ -40,6 +41,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_unetplusplus(self):
+        """ Test Create UnetPlusPlus"""
         self.conf.model.architecture = 'UnetPlusPlus'
         model = create_smp_model(self.conf)
 
@@ -49,6 +51,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_manet(self):
+        """ Test Create MAnet """
         self.conf.model.architecture = 'MAnet'
         model = create_smp_model(self.conf)
 
@@ -58,6 +61,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_linknet(self):
+        """ Test Create Linknet """
         self.conf.model.architecture = 'Linknet'
         model = create_smp_model(self.conf)
 
@@ -67,6 +71,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_fpn(self):
+        """ Test Create FPN """
         self.conf.model.architecture = 'FPN'
         model = create_smp_model(self.conf)
         
@@ -76,6 +81,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_pspnet(self):
+        """ Test Create PSPNet """
         self.conf.model.architecture = 'PSPNet'
         model = create_smp_model(self.conf)
 
@@ -85,6 +91,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_pan(self):
+        """ Test Create PAN"""
         self.conf.model.architecture = 'PAN'
         model = create_smp_model(self.conf)
 
@@ -94,6 +101,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_deeplabv3(self):
+        """ Test Create DeepLabV3 """
         self.conf.model.architecture = 'DeepLabV3'
         model = create_smp_model(self.conf)
 
@@ -103,6 +111,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_upernet(self):
+        """ Test Create UPerNet """
         self.conf.model.architecture = 'UPerNet'
         model = create_smp_model(self.conf)
 
@@ -112,6 +121,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_segformer(self):
+        """ Test Create Segformer """
         self.conf.model.architecture = 'Segformer'
         model = create_smp_model(self.conf)
 
@@ -121,6 +131,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_deeplabv3plus(self):
+        """ Test Create DeepLabV3Plus """
         self.conf.model.architecture = 'DeepLabV3Plus'
         model = create_smp_model(self.conf)
 
@@ -130,6 +141,7 @@ class TestModelCreation(unittest.TestCase):
         )
 
     def test_badencodername(self):
+        """ Test Bad Encoder Name """
         r = RandomWord()
         word = r.word()
 

@@ -21,14 +21,34 @@ class InfiniteSampler(Sampler):
 
     def __iter__(self):
         """ Iterate through the dataloader by wrapping the shuffled indices """
-        random.shuffle(self.indices)
         while True:
-            for i in self.indices:
-                yield i % len(self.indices)
+            indices = list(range(len(self.dataset)))
+            random.shuffle(indices)
+            for idx in indices:
+                yield idx
 
     def __len__(self):
         """ Return the length of the data """
         return len(self.dataset)
+    
+
+# class InfiniteSampler(Sampler):
+#     """ Infinite Sampler for a torch.utils.data.Dataloader """
+#     def __init__(self, dataset: torch.utils.data.Dataset):
+#         self.indices = list(range(len(dataset)))
+#         self.dataset = dataset
+
+#     def __iter__(self):
+#         """ Iterate through the dataloader by wrapping the shuffled indices """
+#         random.shuffle(self.indices)
+#         while True:
+#             for i in self.indices:
+#                 yield i % len(self.indices)
+
+#     def __len__(self):
+#         """ Return the length of the data """
+#         return len(self.dataset)
+    
 
 class DataLoaderBalancer:
     """
@@ -62,18 +82,18 @@ class DataLoaderBalancer:
         self.dl_lengths = []
         self.dataloaders = []
 
+        # Quality checks for batch sizes
+        if any([type(i) != int for i in batch_sizes]):
+            raise ValueError(f"One or more of the batch sizes is not an integer. Please ensure that all batch sizes are positive integers.")
+        elif any([i < 0 for i in batch_sizes]):
+            raise ValueError(f"One of the batch size elements is negative. Please ensure that all batch sizes are positive integers.")
+        
         # Quality checks for datasets
         if len(self.datasets) != len(self.batch_sizes):
             raise ValueError("The number of datasets does not equal the number of batch sizes. Please ammend appropriately")
         for i, (ds, bs) in enumerate(zip(self.datasets, self.batch_sizes)):
             if len(ds) < bs:
                 raise ValueError(f"Dataset {i+1} has fewer elements than its specified batch size. Please select a batch size smaller than {bs} and try again.")
-
-        # Quality checks for batch sizes
-        if any([i < 0 for i in batch_sizes]):
-            raise ValueError(f"One of the batch sizes has a negative element. Please ensure that all batch sizes are positive integers.")
-        elif any([type(i) != int for i in batch_sizes]):
-            raise ValueError(f"One or more of the batch sizes is not an integer. Please ensure that all batch sizes are positive integers.")
 
         # Enforce correct dataloader lengths
         if drop_last:
@@ -101,11 +121,11 @@ class DistributedInfiniteSampler(Sampler):
     def __init__(self, dataset: Dataset, num_replicas: Optional[int] = None, rank: Optional[int]=None, shuffle: bool=True, seed: int=0):
         if num_replicas is not None:
             if not dist.is_available():
-                raise RuntimeError("Requires distribbuted package to be available")
+                raise RuntimeError("Requires distributed package to be available")
             num_replicas = dist.get_world_size()
         if rank is not None:
             if not dist.is_available():
-                raise RuntimeError("Requiires distributed package to be available")
+                raise RuntimeError("Requires distributed package to be available")
             rank = dist.get_rank()
         if rank >= num_replicas or rank < 0:
             raise ValueError(f"Invalid rank {rank}, rank should be in the interval [0, {num_replicas - 1}]")

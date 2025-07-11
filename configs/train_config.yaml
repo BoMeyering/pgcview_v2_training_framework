@@ -7,19 +7,26 @@ images:
 
 # Directories
 directories:
-  train_labeled_dir: data/processed/train/labeled
-  train_unlabeled_dir: data/processed/train/unlabeled
-  val_dir:
-  test_dir:
-  output_dir:
+  train_labeled_dir: data/toy_dataset/train/labeled
+  train_unlabeled_dir: data/toy_dataset/train/unlabeled
+  val_dir: data/processed/val
+  test_dir: data/processed/test
+  output_dir: outputs
+  chkpt_dir: model_checkpoints
 
 # Optimizer
-optim_name:
-lr:
-momentum:
-beta1:
-beta2:
-nesterov: True
+training:
+  epochs: 10
+  optim_name:
+  lr:
+  momentum:
+  beta1:
+  beta2:
+  nesterov: True
+
+batch_size:
+  labeled: 2
+  unlabled: 2
 
 # Flexmatch
 flexmatch:
@@ -35,6 +42,6 @@ model:
     encoder_depth: 5
     encoder_weights: imagenet
     input_channels: 3
-    classes: 5
+    num_classes: 5
   weight_decay:
   filter_bias_and_bn: True

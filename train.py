@@ -10,6 +10,10 @@ import argparse
 import omegaconf
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
+from torch.utils.data import DataLoader
+from torch.optim import SGD
+from torch.optim.lr_scheduler import ExponentialLR
+from torch.nn import CrossEntropyLoss
 
 # Local imports
 from src.models import create_smp_model
@@ -38,7 +42,9 @@ conf = OmegaConf.load(args.config)
 def main(conf: omegaconf.OmegaConf=conf):
     
     # Set torch device
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    conf.device = device
 
     # Create model
     model = create_smp_model(conf=conf).to(device)
@@ -55,11 +61,28 @@ def main(conf: omegaconf.OmegaConf=conf):
         transforms=train_transforms
     )
 
-    train_u_ds = UnlabeledDataset(
-        root_dir=conf.directories.train_unlabeled_dir,
-        weak_transforms=weak_transforms
-    )
+    # train_u_ds = UnlabeledDataset(
+    #     root_dir=conf.directories.train_unlabeled_dir,
+    #     weak_transforms=weak_transforms
+    # )
 
+    # Create DataLoaders
+    train_loader = DataLoader(train_l_ds, conf.batch_size.labeled, shuffle=True)
+
+    # Optimizer
+    optimizer = SGD(params=model.parameters())
+    
+    # Criterion
+    criterion = CrossEntropyLoss()
+
+    supervised_trainer = SupervisedTrainer(
+        "my supervised trainer", 
+        conf=conf, 
+        model=model, 
+        train_loader=train_loader, 
+        val_loader=train_loader,
+        optimizer=optimizer,
+        criterion=criterion)
     
 
 

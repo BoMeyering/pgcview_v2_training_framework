@@ -18,7 +18,7 @@ from typing import Union, Any, Tuple
 from pathlib import Path
 from glob import glob
 
-from src.transforms import get_train_transforms, get_weak_transforms, get_strong_transforms
+from src.transforms import get_train_transforms, get_weak_transforms, get_strong_transforms, get_tensor_transforms
 
 
 
