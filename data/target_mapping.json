@@ -1,0 +1,50 @@
+{
+    "soil": {
+        "class_idx": 0,
+        "rgb": [55, 52, 28]
+    },
+    "stover": {
+        "class_idx": 1,
+        "rgb": [135, 156, 144]
+    },
+    "pgc": {
+        "class_idx": 2,
+        "rgb": [6, 123, 2]
+    },
+    "weed": {
+        "class_idx": 3,
+        "rgb": [255, 0, 0]
+    },
+    "corn": {
+        "class_idx": 4,
+        "rgb": [120, 124, 243]
+    },
+    "soybean": {
+        "class_idx": 5,
+        "rgb": [255, 242, 0]
+    },
+    "marker": {
+        "class_idx": 6,
+        "rgb": [9, 0, 255]
+    },
+    "quadrat": {
+        "class_idx": 7,
+        "rgb": [255, 171, 171]
+    },
+    "snow": {
+        "class_idx": 8,
+        "rgb": [255, 188, 0]
+    },
+    "namecard": {
+        "class_idx": 9,
+        "rgb": [180, 10, 230]
+    },
+    "person": {
+        "class_idx": 10,
+        "rgb": [39, 47, 72]
+    },
+    "marking_flag": {
+        "class_idx": 11,
+        "rgb": [53, 125, 62]
+    }
+}
