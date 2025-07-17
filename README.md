@@ -6,6 +6,7 @@ Since our dataset is largely unlabeled and unbalanced, we are using a modified v
 ## To Do
 
 - [x] Finish the FlexMatch trainer class
-- [ ] Format dataset and run Welford calculator to find RGB means and Std.
+- [x] Format dataset and run Welford calculator to find RGB means and Std.
 - [x] Create a Labelbox API call script to pull in the annotations from our labeling project and automatically move images from 'all_images' into the labeled and unlabeled folders.
+- [ ] Work on training supervised script
 - [ ] Create a new train and inference script.
