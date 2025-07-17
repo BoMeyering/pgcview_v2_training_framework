@@ -3,30 +3,34 @@ model_run: model_run_name
 
 images:
   input_channels: 3
-  resize: [1024, 1024]
+  resize: [512, 512]
 
 # Directories
 directories:
-  train_labeled_dir: data/toy_dataset/train/labeled
+  # train_labeled_dir: data/toy_dataset/train/labeleds
+  train_labeled_dir: data/processed/train/labeled
   train_unlabeled_dir: data/toy_dataset/train/unlabeled
-  val_dir: data/processed/val
-  test_dir: data/processed/test
+  val_dir: data/toy_dataset/val
+  test_dir: data/toy_dataset/test
   output_dir: outputs
-  chkpt_dir: model_checkpoints
+  checkpoint_dir: model_checkpoints
 
 # Optimizer
 training:
   epochs: 10
-  optim_name:
-  lr:
-  momentum:
-  beta1:
-  beta2:
+  # optim_name:
+  lr: 0.001
+  # momentum:
+  # beta1:
+  # beta2:
   nesterov: True
+
+# Computation Device
+device: cuda
 
 batch_size:
   labeled: 2
-  unlabled: 2
+  unlabeled: 2
 
 # Flexmatch
 flexmatch:
@@ -36,12 +40,15 @@ flexmatch:
 
 # Model Architecture
 model:
-  architecture: DeepLabV3
+  architecture: UNET
   config:
     encoder_name: resnet18
     encoder_depth: 5
     encoder_weights: imagenet
     input_channels: 3
-    num_classes: 5
-  weight_decay:
+    classes: 12
+  # weight_decay:
   filter_bias_and_bn: True
+
+metadata:
+  norm_path: metadata/dataset_norm.json

@@ -35,7 +35,7 @@ def create_smp_model(conf: omegaconf.dictconfig.DictConfig) -> torch.nn.Module:
         raise ValueError(f"Encoder name {model_config.encoder_name} is not one of the accepted encoders. Please select an encoder from {smp.encoders.get_encoder_names()}")
     
     try:
-        model_class = getattr(smp, conf.model.architecture)
+        model_class = getattr(smp, conf.model.architecture.value)
         model = model_class(**model_config)
 
         return model

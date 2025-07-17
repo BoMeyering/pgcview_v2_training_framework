@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 
 import os
+import sys
 import torch
 import re
 import cv2
@@ -60,20 +61,32 @@ class StatDataset(Dataset):
 
         # Load the image, convert to RGB format
         try:
-            img = cv2.imread(
-                str(self.img_dir / img_key), 
-                cv2.IMREAD_COLOR
-            )
+            img_path = self.img_dir / img_key
+            img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+            if img is None:
+                return {
+                    "img": torch.zeros(3, 512, 512),
+                    "img_key": img_key,
+                    "is_error": True,
+                    "errors": f"There was a problem reading in the image."
+                }
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = img.astype("float32") / 255.0 # Normalize image to [0, 1]
             tensor_img = self.transforms(image=img)['image'] # Convert to tensor
 
-            return (tensor_img, img_key)
-        
-        except Exception as e:
-            print(e)
-            
-            return torch.tensor(1), img_key
+            return {
+                "img": tensor_img,
+                "img_key": img_key,
+                "is_error": False,
+                "errors": "None"
+            }
+        except cv2.error as e:
+            return {
+                "img": torch.zeros(3, 512, 512),
+                "img_key": img_key,
+                "is_error": True,
+                "errors": f"There was a problem converting the image from BGR to RGB: {e}"
+            }
 
     def __len__(self):
         """ Return length of StatDataset """
@@ -315,17 +328,9 @@ class UnlabeledDataset(Dataset):
 
 
 
-
-
-
-
-
 if __name__ == '__main__':
+    s_ds = StatDataset('data/toy_dataset/all_images')
 
-    u_root = 'data/raw/labeled'
-    u_ds = UnlabeledDataset(root_dir=u_root)
+    print(len(s_ds))
 
-    for i in range(len(u_ds)):
-        img= u_ds[i]
-
-        print(img)
+    print(s_ds[155])

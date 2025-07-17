@@ -20,7 +20,9 @@ from src.models import create_smp_model
 from src.datasets import LabeledDataset, UnlabeledDataset
 from src.flexmatch import class_beta
 from src.trainer import SupervisedTrainer, FlexMatchTrainer
-from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms
+from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
+from src.utils.device import set_torch_device
+from src.utils.config import TrainSupervisedConfig
 
 # Create a parser
 parser = ArgumentParser(
@@ -34,20 +36,26 @@ args = parser.parse_args()
 if not os.path.exists(args.config):
     raise FileNotFoundError(f"The path to the configuration file {args.config} was not found.")
 
-# Read in the configuration file
-conf = OmegaConf.load(args.config)
+# Read in the configuration file and merge with default dict
+yaml_conf = OmegaConf.load(args.config)
 
+print(OmegaConf.to_yaml(yaml_conf))
+
+conf = OmegaConf.merge(OmegaConf.structured(TrainSupervisedConfig), yaml_conf)
 
 
 def main(conf: omegaconf.OmegaConf=conf):
     
     # Set torch device
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    set_torch_device(conf)
 
-    conf.device = device
+    # Set data normalization values
+    set_normalization_values(conf)
+
+    print(OmegaConf.to_yaml(conf))
 
     # Create model
-    model = create_smp_model(conf=conf).to(device)
+    model = create_smp_model(conf=conf).to(conf.device)
 
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
@@ -56,21 +64,25 @@ def main(conf: omegaconf.OmegaConf=conf):
     strong_transforms = get_strong_transforms(resize=tuple(conf.images.resize))
 
     # Create Datasets
-    train_l_ds = LabeledDataset(
+    train_ds = LabeledDataset(
         root_dir=conf.directories.train_labeled_dir,
         transforms=train_transforms
     )
 
-    # train_u_ds = UnlabeledDataset(
-    #     root_dir=conf.directories.train_unlabeled_dir,
-    #     weak_transforms=weak_transforms
-    # )
+    val_ds = LabeledDataset(
+        root_dir=conf.directories.val_dir,
+        transforms=val_transforms
+    )
 
     # Create DataLoaders
-    train_loader = DataLoader(train_l_ds, conf.batch_size.labeled, shuffle=True)
+    train_loader = DataLoader(train_ds, conf.batch_size.labeled, shuffle=True)
+    val_loader = DataLoader(val_ds, conf.batch_size.labeled, shuffle=True)
 
     # Optimizer
-    optimizer = SGD(params=model.parameters())
+    optimizer = SGD(lr=0.001, params=model.parameters())
+
+    # Scheduler
+    scheduler = ExponentialLR(optimizer=optimizer, gamma=0.99)
     
     # Criterion
     criterion = CrossEntropyLoss()
@@ -80,9 +92,12 @@ def main(conf: omegaconf.OmegaConf=conf):
         conf=conf, 
         model=model, 
         train_loader=train_loader, 
-        val_loader=train_loader,
+        val_loader=val_loader,
         optimizer=optimizer,
+        scheduler=scheduler,
         criterion=criterion)
+    
+    supervised_trainer.train()
     
 
 

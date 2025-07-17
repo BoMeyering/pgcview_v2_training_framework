@@ -4,9 +4,16 @@ Image Augmentations and Transformations
 BoMeyering 2025
 """
 import albumentations
+import logging
+import os
+import json
+import omegaconf
 import albumentations as A
+from omegaconf import OmegaConf
 from albumentations.pytorch import ToTensorV2
 from typing import Tuple, Iterable, Union
+
+from src.utils.config import Norm
 
 
 def get_train_transforms(
@@ -156,9 +163,58 @@ def get_tensor_transforms(
  
     return transforms
 
+def set_normalization_values(conf: OmegaConf):
+    """_summary_
+
+    Args:
+        conf (OmegaConf): _description_
+    """
+
+    logger = logging.getLogger()
+    if not isinstance(conf, omegaconf.dictconfig.DictConfig):
+        raise ValueError(f"Argument 'conf' should be of type 'omegaconf.dictconfig.DictConfig'.")
+    
+    if 'metadata' in conf:
+        if (conf.metadata is not None) and ('norm_path' in conf.metadata):
+            if os.path.exists(conf.metadata.norm_path):
+                with open(conf.metadata.norm_path, 'r') as f:
+                    norm_dict = json.load(f)
+                    conf.metadata.norm = Norm(means=norm_dict['means'], std=norm_dict['std'])
+            else:
+                raise ValueError(f"Path to normalization values ({conf.metadata.norm_path}) does not exist")
+        else:
+            raise KeyError(f"Key 'norm_path' not found in 'conf.metadata'. Please set 'conf.metadata.norm_path' to the normalization value JSON path.")
+    else:
+        raise KeyError(f"Key 'metadata.norm_path' not found in 'conf'. Please set 'conf.metadata.norm_path' to the normalization value JSON path.")
 
 
+def set_torch_device(conf: OmegaConf) -> OmegaConf:
+    """_summary_
 
+    Args:
+        conf (OmegaConf): _description_
+
+    Returns:
+        OmegaConf: _description_
+    """
+
+    logger = logging.getLogger()
+    if not isinstance(conf, omegaconf.dictconfig.DictConfig):
+        raise ValueError(f"Argument 'conf' should be of type 'omegaconf.dictconfig.DictConfig'.")
+    
+    if 'device' in conf:
+        if conf.device == 'cuda':
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            if device != conf.device:
+                logger.info("CUDA Device is not available at this time. Falling back to CPU computation.")
+            conf.device = device
+        elif conf.device not in ['cpu', 'cuda']:
+            print("Incorrect value set for 'conf.device'. Must be one of ['cpu', 'cuda']. Falling back to 'cpu' computation.")
+            logger.info("Incorrect value set for 'conf.device'. Must be one of ['cpu', 'cuda']. Falling back to 'cpu' computation.")
+            conf.device = 'cpu'
+    else:
+        logger.info("No value set for 'conf.training.device'. Setting to 'cpu'. If 'cuda' devices are available, please explicitly pass 'device: cuda' in the configuration YAML.")
+        conf.device = 'cpu'
 
 
 

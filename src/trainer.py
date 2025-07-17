@@ -462,28 +462,26 @@ class SupervisedTrainer(Trainer):
 
         # Set up metrics class
         self.train_metrics = MetricLogger(
-            num_classes=self.conf.model.config.num_classes, device=self.conf.device
+            num_classes=self.conf.model.config.classes, device=self.conf.device
         )
         self.val_metrics = MetricLogger(
-            num_classes=self.conf.model.config.num_classes, device=self.conf.device
+            num_classes=self.conf.model.config.classes, device=self.conf.device
         )
 
-        chkpt_path = Path(self.conf.directories.chkpt_dir) / self.conf.model_run
+        checkpoint_path = Path(self.conf.directories.checkpoint_dir) / self.conf.model_run
         # self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.conf), monitor='train_loss')
 
     def _train_step(self, batch: Tuple):
-
-        # Unpack batch
+        """ Train over one batch """
+        # Unpack batch and send to device
         img, targets = batch
-
-        # Send inputs to device
         inputs = img.to(self.conf.device)
         targets = targets.long().to(self.conf.device)
 
-        # Compute logits for labeled and unlabeled images
+        # Forward pass through model
         logits = self.model(inputs)
 
-        # Compute the loss
+        # Compute the training loss
         loss = self.criterion(logits, targets)
 
         # Update the training loss meter
@@ -498,8 +496,8 @@ class SupervisedTrainer(Trainer):
         return loss
 
     def _train_epoch(self, epoch: int):
-        """ Traing one epoch """
-        # Reset meters
+        """ Traing over one epoch """
+        # Put model in training mode and reset meters
         self.model.train()
         self.meters.reset()
         self.train_metrics.reset()
@@ -507,6 +505,7 @@ class SupervisedTrainer(Trainer):
         # Set progress bar and unpack batches
         p_bar = tqdm(range(len(self.train_loader)))
 
+        # Iterate through the batches
         for batch_idx, batch in enumerate(self.train_loader):
 
             # Zero the optimizer
@@ -588,37 +587,41 @@ class SupervisedTrainer(Trainer):
 
     @torch.no_grad()
     def _val_step(self, batch: Tuple):
+        """ Validate over one batch """
 
         # Unpack batch and send to device
         img, targets = batch
-        img = img.float().to(self.conf.device)
+        inputs = img.to(self.conf.device)
         targets = targets.long().to(self.conf.device)
 
         # Forward pass through model
-        logits = self.model(img)
+        logits = self.model(inputs)
 
-        # Calculate validation loss
+        # Compute validation loss
         loss = self.criterion(logits, targets)
 
-        # Update running meters
+        # Update the validation loss meter
         self.meters.update("validation_loss", loss.item(), logits.size()[0])
 
         # Get the class predictions
         preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
-        # Update metrics
+        # Update the validation metrics
         self.val_metrics.update(preds=preds, targets=targets)
 
         return loss
 
     @torch.no_grad()
     def _val_epoch(self, epoch: int):
-        # Reset meters
+        """ Validate over one epoch """
+        # Put model in eval mode and reset meters
         self.model.eval()
         self.meters.reset()
 
         # Set progress bar and unpack batches
         p_bar = tqdm(range(len(self.val_loader)))
+
+        # Iterate through the batches
         for batch_idx, batch in enumerate(self.val_loader):
 
             # Validate one batch
@@ -628,7 +631,7 @@ class SupervisedTrainer(Trainer):
             p_bar.set_description(
                 "Val Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.6f}. Loss: {loss:.6f}".format(
                     epoch=epoch + 1,
-                    epochs=self.conf.model.epochs,
+                    epochs=self.conf.training.epochs,
                     batch=batch_idx + 1,
                     iter=len(self.val_loader),
                     lr=self.scheduler.get_last_lr()[0],
@@ -647,43 +650,43 @@ class SupervisedTrainer(Trainer):
         # Epoch Loss Logging
         loss_dict = {"validation_loss": avg_loss}
 
-        if self.rank == 0:
-            self.tb_logger.log_scalar_dict(
-                main_tag="epoch_loss", scalar_dict=loss_dict, step=epoch_step
-            )
+        # if self.rank == 0:
+        #     self.tb_logger.log_scalar_dict(
+        #         main_tag="epoch_loss", scalar_dict=loss_dict, step=epoch_step
+        #     )
 
-            # Epoch Average Validation Metric Logging
-            self.tb_logger.log_scalar_dict(
-                main_tag="epoch_val_metrics", scalar_dict=avg_metrics, step=epoch_step
-            )
+        #     # Epoch Average Validation Metric Logging
+        #     self.tb_logger.log_scalar_dict(
+        #         main_tag="epoch_val_metrics", scalar_dict=avg_metrics, step=epoch_step
+        #     )
 
-            # Epoch Multiclass Validation Metric Logging
-            self.tb_logger.log_tensor_dict(
-                main_tag="epoch_val_metrics",
-                tensor_dict=mc_metrics,
-                step=epoch_step,
-                class_map=self.class_map
-            )
+        #     # Epoch Multiclass Validation Metric Logging
+        #     self.tb_logger.log_tensor_dict(
+        #         main_tag="epoch_val_metrics",
+        #         tensor_dict=mc_metrics,
+        #         step=epoch_step,
+        #         class_map=self.class_map
+        #     )
 
-            # Update the epoch in the DistributedSampler
-            if self.train_sampler is not None:
-                self.train_sampler.set_epoch(epoch)
+        #     # Update the epoch in the DistributedSampler
+        #     if self.train_sampler is not None:
+        #         self.train_sampler.set_epoch(epoch)
 
 
-            # Train and validate one epoch
-            train_loss = self._train_epoch(epoch)
-            # val_loss = self._val_epoch(epoch)
+        #     # Train and validate one epoch
+        #     train_loss = self._train_epoch(epoch)
+        #     # val_loss = self._val_epoch(epoch)
 
-            logs = {
-                "epoch": epoch,
-                "train_loss": torch.tensor(train_loss),
-                # "val_loss": torch.tensor(val_loss),
-                "model_state_dict": self.model.state_dict(),
-            }
+        #     logs = {
+        #         "epoch": epoch,
+        #         "train_loss": torch.tensor(train_loss),
+        #         # "val_loss": torch.tensor(val_loss),
+        #         "model_state_dict": self.model.state_dict(),
+        #     }
 
             
 
-            self.checkpoint(epoch=epoch, logs=logs)
+        #     self.checkpoint(epoch=epoch, logs=logs)
 
     def train(self):
         """ Train the model """
@@ -696,7 +699,7 @@ class SupervisedTrainer(Trainer):
             # self.logger.info(f"TRAINING EPOCH {epoch + 1}")
             train_loss = self._train_epoch(epoch)
             # self.logger.info(f"VALIDATING EPOCH {epoch + 1}")
-            # val_loss = self._val_epoch(epoch)
+            val_loss = self._val_epoch(epoch)
 
             # logs = {
             #     "epoch": epoch,
