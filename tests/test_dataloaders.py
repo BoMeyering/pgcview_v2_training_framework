@@ -90,8 +90,8 @@ class TestDataloaderBalancer(unittest.TestCase):
     def test_create_dl_balancer(self):
         """ Create and test a DataLoaderBalancer """
 
-        l_img = [filename for filename in glob("*", root_dir=self.l_ds.img_dir) if filename.lower().endswith(("jpg", "jpeg", "pn"))]
-        u_img = [filename for filename in glob("*", root_dir=self.u_ds.img_dir) if filename.lower().endswith(("jpg", "jpeg", "pn"))]
+        l_img = [filename for filename in glob("*", root_dir=self.l_ds.img_dir) if filename.lower().endswith(("jpg", "jpeg", "png"))]
+        u_img = [filename for filename in glob("*", root_dir=self.u_ds.img_dir) if filename.lower().endswith(("jpg", "jpeg", "png"))]
 
         max_ds_length = max(len(l_img), len(u_img))
 
@@ -100,8 +100,8 @@ class TestDataloaderBalancer(unittest.TestCase):
         dl_balancer = DataLoaderBalancer(*datasets, batch_sizes=(2, 2), drop_last=True)
         dataloaders, max_dl_length = dl_balancer.balance_loaders()  
 
+        # Assert the the longest dataloader in the balancer is equal to the length of that dataset divided by the batch size
         self.assertEqual(max_ds_length // 2, max_dl_length)
-
 
         # Create balancer with batch_size=3 and drop_last=True and balance
         dl_balancer = DataLoaderBalancer(*datasets, batch_sizes=(3, 3), drop_last=True)
@@ -126,10 +126,6 @@ class TestDataloaderBalancer(unittest.TestCase):
         # Negative batch sizes
         with self.assertRaises(ValueError):
             dl_balancer = DataLoaderBalancer(*datasets, batch_sizes=(10, -10), drop_last=False)
-
-        # Float batch size
-        with self.assertRaises(ValueError):
-            dl_balancer = DataLoaderBalancer(*datasets, batch_sizes=(10, 4.3), drop_last=False)
 
         # Float batch size
         with self.assertRaises(ValueError):

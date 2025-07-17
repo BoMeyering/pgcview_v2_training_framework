@@ -1,0 +1,7 @@
+# calc_mean_and_std.yaml
+# List out all of the directories containing images used in the training scheme
+image_dirs:
+  - 'data/processed/train/labeled/images'
+  - 'data/processed/train/unlabeled/images'
+device: cuda
+out_path: 'metadata/dataset_norm.json'

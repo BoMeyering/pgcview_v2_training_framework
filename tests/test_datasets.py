@@ -107,7 +107,7 @@ class TestDatasetIteration(unittest.TestCase):
         self.l_ds = LabeledDataset(root_dir=self.conf.directories.train_labeled_dir)
         self.u_ds = UnlabeledDataset(root_dir=self.conf.directories.train_unlabeled_dir)
         self.s_ds = StatDataset(root_dir=self.conf.directories.stat_dir)
-        self.t_ds = StatDataset(root_dir=self.conf.directories.target_dir)
+        self.t_ds = TargetDataset(root_dir=self.conf.directories.target_dir)
 
     def test_labeled_dataset_iteration(self):
         """ Test LabeledDataset Iteration """
@@ -152,20 +152,30 @@ class TestDatasetIteration(unittest.TestCase):
 
         # Test ordered iteration through the dataset
         for i in range(len(self.s_ds)):
-            img, img_key = self.s_ds[i]
+            batch = self.s_ds[i]
+            self.assertIsInstance(batch, dict)
+            
+            img, img_key, is_error, errors = batch['img'], batch['img_key'], batch['is_error'], batch['errors']
             self.assertIsInstance(img, Tensor)
             self.assertIsInstance(img_key, str)
+            self.assertIsInstance(is_error, bool)
+            self.assertIsInstance(errors, str)
 
         # Test random indices
         for _ in range(50):
             idx = randint(0, 2*len(self.s_ds))
             if idx < len(self.s_ds):
-                img, img_key = self.s_ds[i]
+                batch = self.s_ds[idx]
+                self.assertIsInstance(batch, dict)
+            
+                img, img_key, is_error, errors = batch['img'], batch['img_key'], batch['is_error'], batch['errors']
                 self.assertIsInstance(img, Tensor)
                 self.assertIsInstance(img_key, str)
+                self.assertIsInstance(is_error, bool)
+                self.assertIsInstance(errors, str)
             else:
                 with self.assertRaises(IndexError):
-                    img, img_key = self.s_ds[idx]
+                    batch = self.s_ds[idx]
 
     def test_target_dataset_iteration(self):
         """ Test TargetDataset Iteration """
