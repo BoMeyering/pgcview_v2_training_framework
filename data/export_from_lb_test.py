@@ -1,5 +1,7 @@
 # Export this project.
 
+
+import dotenv
 import urllib
 import json
 import os
@@ -13,9 +15,12 @@ import cv2
 import sys
 import shutil
 
+dotenv.load_dotenv()
 
+API_KEY = os.environ.get('API_KEY')
 
-client = lb.Client(api_key='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGhpNmJiY2swMGt5MDd3YzlncnA1Z2g4Iiwib3JnYW5pemF0aW9uSWQiOiJjbGhpNmJiYzMwMGt4MDd3Y2Q0aG84cnhoIiwiYXBpS2V5SWQiOiJjbWNqazZ0M3EwMzdqMDd4c2I3eGhhOTY0Iiwic2VjcmV0IjoiNjg4YzI2ODI3N2QyZjE2MTcxMTliNTQyMGU2YjRkYjMiLCJpYXQiOjE3NTEzMTU3NjUsImV4cCI6MTc1Njc1ODk2NX0.3YQtosOmslUIKjBmL4SBrDUch8Devjt7gH3gCje1ITE')
+client = lb.Client(api_key=API_KEY)
+# client = lb.Client(api_key='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJjbGhpNmJiY2swMGt5MDd3YzlncnA1Z2g4Iiwib3JnYW5pemF0aW9uSWQiOiJjbGhpNmJiYzMwMGt4MDd3Y2Q0aG84cnhoIiwiYXBpS2V5SWQiOiJjbWNqazZ0M3EwMzdqMDd4c2I3eGhhOTY0Iiwic2VjcmV0IjoiNjg4YzI2ODI3N2QyZjE2MTcxMTliNTQyMGU2YjRkYjMiLCJpYXQiOjE3NTEzMTU3NjUsImV4cCI6MTc1Njc1ODk2NX0.3YQtosOmslUIKjBmL4SBrDUch8Devjt7gH3gCje1ITE')
 params = {}
 
 project = client.get_project('cma74xh22061607ysdyf4gudl')

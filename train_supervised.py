@@ -6,12 +6,13 @@ BoMeyering 2025
 
 import torch
 import os
+import logging
 import argparse
 import omegaconf
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
-from torch.optim import SGD
+from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn import CrossEntropyLoss
 
@@ -22,7 +23,9 @@ from src.flexmatch import class_beta
 from src.trainer import SupervisedTrainer, FlexMatchTrainer
 from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
 from src.utils.device import set_torch_device
-from src.utils.config import TrainSupervisedConfig
+from src.utils.config import TrainSupervisedConfig, set_run_name
+from src.utils.loggers import setup_loggers
+
 
 # Create a parser
 parser = ArgumentParser(
@@ -38,21 +41,26 @@ if not os.path.exists(args.config):
 
 # Read in the configuration file and merge with default dict
 yaml_conf = OmegaConf.load(args.config)
-
-print(OmegaConf.to_yaml(yaml_conf))
-
 conf = OmegaConf.merge(OmegaConf.structured(TrainSupervisedConfig), yaml_conf)
-
 
 def main(conf: omegaconf.OmegaConf=conf):
     
+    # Append timestamp to run name
+    set_run_name(conf)
+
+    # Set up loggers
+    setup_loggers(conf)
+    logger = logging.getLogger()
+
     # Set torch device
     set_torch_device(conf)
 
     # Set data normalization values
     set_normalization_values(conf)
 
-    print(OmegaConf.to_yaml(conf))
+    # Log training
+    logger.info("Current Training Configuration")
+    logger.info(OmegaConf.to_yaml(conf))
 
     # Create model
     model = create_smp_model(conf=conf).to(conf.device)
@@ -60,8 +68,7 @@ def main(conf: omegaconf.OmegaConf=conf):
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
     val_transforms = get_val_transforms(resize=tuple(conf.images.resize))
-    weak_transforms = get_weak_transforms(resize=tuple(conf.images.resize))
-    strong_transforms = get_strong_transforms(resize=tuple(conf.images.resize))
+    test_transforms = get_val_transforms(resize=tuple(conf.images.resize))
 
     # Create Datasets
     train_ds = LabeledDataset(
@@ -74,12 +81,19 @@ def main(conf: omegaconf.OmegaConf=conf):
         transforms=val_transforms
     )
 
+    test_ds = LabeledDataset(
+        root_dir=conf.directories.test_dir,
+        transforms=test_transforms
+    )
+
     # Create DataLoaders
     train_loader = DataLoader(train_ds, conf.batch_size.labeled, shuffle=True)
     val_loader = DataLoader(val_ds, conf.batch_size.labeled, shuffle=True)
+    test_loader = DataLoader(test_ds, conf.batch_size.labeled, shuffle=True)
 
     # Optimizer
-    optimizer = SGD(lr=0.001, params=model.parameters())
+    optimizer = Adam(params=model.parameters(), lr=0.001, foreach=True)
+    # optimizer = SGD(lr=0.001, params=model.parameters(), foreach=True)
 
     # Scheduler
     scheduler = ExponentialLR(optimizer=optimizer, gamma=0.99)
