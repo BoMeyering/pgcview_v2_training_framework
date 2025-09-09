@@ -1,0 +1,11 @@
+cff-version: 1.0.0
+message: "If you use this repository, please cite it as below."
+authors:
+- family-names: "Meyering"
+  given-names: "Bo"
+  orcid: "https://orcid.org/0000-0002-1524-787X"
+title: "pgcview_v2_training_framework"
+version: 0.0.1
+# doi: 
+date-released: 2025-08-07
+url: "https://github.com/BoMeyering/pgcview_v2_training_framework.git"

@@ -25,6 +25,7 @@ class Directories:
     test_dir: str='data/processed/test'
     output_dir: str='outputs'
     checkpoint_dir: str='model_checkpoints'
+    log_dir: str='logs/run_logs'
 
 @dataclass
 class Training:
@@ -88,14 +89,7 @@ class Metadata:
 
 @dataclass
 class TrainSupervisedConfig:
-    model_run: str=field(
-        default_factory=lambda: "_".join(
-            [
-                'model_run', 
-                datetime.datetime.now().isoformat(timespec='seconds', sep='_').replace(":", ".")
-            ]
-        )
-    )
+    model_run: str='model_run'
     images: Images=field(default_factory=Images)
     directories: Directories=field(default_factory=Directories)
     training: Training=field(default_factory=Training)
@@ -104,4 +98,14 @@ class TrainSupervisedConfig:
     flexmatch: FlexMatch=field(default_factory=FlexMatch)
     model: Model=field(default_factory=Model)
     metadata: Metadata=field(default_factory=Metadata)
+    logging_level: str='INFO'
 
+def set_run_name(conf: OmegaConf):
+    """
+    Append timestamp to conf.run_name
+
+    Args:
+        conf (OmegaConf): OmegaConf configuration dict
+    """
+    run_name = "_".join([conf.model_run, datetime.datetime.now().isoformat(timespec='seconds', sep='_').replace(":", ".")])
+    conf.model_run = run_name

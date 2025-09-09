@@ -14,6 +14,7 @@ directories:
   test_dir: data/toy_dataset/test
   output_dir: outputs
   checkpoint_dir: model_checkpoints
+  log_dir: logs/run_logs
 
 # Optimizer
 training:
@@ -52,3 +53,5 @@ model:
 
 metadata:
   norm_path: metadata/dataset_norm.json
+
+logging_level: DEBUG
