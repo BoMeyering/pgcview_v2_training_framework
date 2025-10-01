@@ -1,5 +1,5 @@
 # Training configs
-model_run: model_run_name
+model_run: segformer_focal
 
 images:
   input_channels: 3
@@ -28,11 +28,9 @@ training:
 
 # Criterion / Loss Function
 loss:
-  name: CELOSS
-  # samples: 
-  # weights: 
+  name: FOCALLOSS
+  gamma: 2.0 # Focal loss gamma parameter
   reduction: mean
-  # loss_type: CELOSS
 
 # Computation Device
 device: cuda

@@ -12,6 +12,35 @@ from omegaconf import OmegaConf
 from enum import Enum
 from typing import List
 
+class ModelArchitecture(Enum):
+    """
+    Enumeration of valid segmentation model architectures from segmentation_models_pytorch.
+    """
+    
+    DEEPLABV3 = 'DeepLabV3'
+    DEEPLABV3PLUS = 'DeepLabV3Plus'
+    FPN = 'FPN'
+    LINKNET = 'Linknet'
+    MANET = 'MAnet'
+    PAN = 'PAN'
+    PSPNET = 'PSPNet'
+    SEGFORMER = 'Segformer'
+    UPERNET = 'UPerNet'
+    UNET = 'Unet'
+    UNETPLUSPLUS = 'UnetPlusPlus'
+
+class LossCriterion(Enum):
+    """
+    Enumeration of valid loss functions implemented in src.losses
+    """
+    CELOSS = 'CELoss'
+    FOCALLOSS = 'FocalLoss'
+    CBLOSS = 'CBLoss'
+    ACBLOSS = 'ACBLoss'
+    RECALLLOSS = 'RecallLoss'
+    DICELOSS = 'DiceLoss'
+    TVERSKYLOSS = 'TverskyLoss'
+
 @dataclass
 class Images:
     input_channels: int=3
@@ -38,6 +67,14 @@ class Training:
     nesterov: bool=True
 
 @dataclass
+class Loss:
+    name: LossCriterion=LossCriterion.CELOSS
+    # samples: List[float]=field(default_factory=list)
+    # weights: List[float]=field(default_factory=list)
+    reduction: str='mean'
+    # loss_type: str
+
+@dataclass
 class BatchSize:
     labeled: int=2
     unlabeled: int=2
@@ -56,26 +93,13 @@ class ModelConfig:
     input_channels: int=3
     classes: int=3
 
-class ModelArchitecture(Enum):
-    DPT = 'DPT'
-    DEEPLABV3 = 'DeepLabV3'
-    DEEPLABV3PLUS = 'DeepLabV3Plus'
-    FPN = 'FPN'
-    LINKNET = 'Linknet'
-    MANET = 'MAnet'
-    PAN = 'PAN'
-    PSPNET = 'PSPNet'
-    SEGFORMER = 'Segformer'
-    UPERNET = 'UPerNet'
-    UNET = 'Unet'
-    UNETPLUSPLUS = 'UnetPlusPlus'
-
 @dataclass
 class Model:
     architecture: ModelArchitecture=ModelArchitecture.UNET
     config: ModelConfig=field(default_factory=ModelConfig)
     weight_decay: float=0.9
     filter_bias_and_bn: bool=True
+
 
 @dataclass
 class Norm:
@@ -93,12 +117,22 @@ class TrainSupervisedConfig:
     images: Images=field(default_factory=Images)
     directories: Directories=field(default_factory=Directories)
     training: Training=field(default_factory=Training)
+    loss: Loss=field(default_factory=Loss)
     device: str='cpu'
     batch_size: BatchSize=field(default_factory=BatchSize)
     flexmatch: FlexMatch=field(default_factory=FlexMatch)
     model: Model=field(default_factory=Model)
     metadata: Metadata=field(default_factory=Metadata)
     logging_level: str='INFO'
+
+@dataclass
+class TrainSemiSupervisedConfig(TrainSupervisedConfig):
+    model_run: str='semi_supervised_model_run'
+    images: Images=field(default_factory=Images)
+    directories: Directories=field(default_factory=Directories)
+    training: Training=field(default_factory=Training)
+    device: str='cpu'
+
 
 def set_run_name(conf: OmegaConf):
     """

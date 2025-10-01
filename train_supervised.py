@@ -1,5 +1,5 @@
 """
-train.py
+train_supervised.py
 Main training script for the PGCView V2 semantic segmentation model
 BoMeyering 2025
 """
@@ -21,15 +21,16 @@ from src.models import create_smp_model
 from src.datasets import LabeledDataset, UnlabeledDataset
 from src.flexmatch import class_beta
 from src.trainer import SupervisedTrainer, FlexMatchTrainer
+from src.losses import get_loss_criterion
 from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
 from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
 from src.utils.loggers import setup_loggers
 
 
-# Create a parser
+# Create a parser for command line arguments
 parser = ArgumentParser(
-    prog="train.py",
+    prog="train_supervised.py",
     description="Main training script for the PGCView V2 semantic segmentation model."
 )
 # Add arguments for config file and then parse CLI args
@@ -39,31 +40,51 @@ args = parser.parse_args()
 if not os.path.exists(args.config):
     raise FileNotFoundError(f"The path to the configuration file {args.config} was not found.")
 
+
+#----------------------------------------#
+# Set up configuration objects
+#----------------------------------------#
 # Read in the configuration file and merge with default dict
-yaml_conf = OmegaConf.load(args.config)
-conf = OmegaConf.merge(OmegaConf.structured(TrainSupervisedConfig), yaml_conf)
+yaml_conf = OmegaConf.load(args.config) # Load user supplied config file
+default_conf = OmegaConf.structured(TrainSupervisedConfig) # Load the default config structure - to fill in any missing args
+conf = OmegaConf.merge(default_conf, yaml_conf) # Any args in yaml_conf will override defaults
 
+# Append timestamp to run name
+set_run_name(conf)
+
+# Set up loggers
+setup_loggers(conf)
+logger = logging.getLogger()
+
+# Set torch device
+set_torch_device(conf)
+
+# Set data normalization values
+set_normalization_values(conf)
+
+#----------------------------------------#
+# Main entry point
+#----------------------------------------#
 def main(conf: omegaconf.OmegaConf=conf):
-    
-    # Append timestamp to run name
-    set_run_name(conf)
+    """Main function to run the supervised training script
 
-    # Set up loggers
-    setup_loggers(conf)
-    logger = logging.getLogger()
+    Run the main training script for supervised training of the PGCView V2 semantic segmentation model.
+    Pulls in all of the configurations from the provided config file and sets up the model, datasets, dataloaders,
+    optimizer, scheduler, and criterion. Then initializes the SupervisedTrainer class and starts training.
 
-    # Set torch device
-    set_torch_device(conf)
-
-    # Set data normalization values
-    set_normalization_values(conf)
+    Parameters:
+    -----------
+        conf : omegaconf.OmegaConf, optional
+            The OmegaConf configuration dictionary, by default conf
+    """
 
     # Log training
     logger.info("Current Training Configuration")
-    logger.info(OmegaConf.to_yaml(conf))
+    logger.info("Training Configuration\n"+OmegaConf.to_yaml(conf))
 
     # Create model
     model = create_smp_model(conf=conf).to(conf.device)
+    logger.info(f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
 
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
@@ -99,7 +120,7 @@ def main(conf: omegaconf.OmegaConf=conf):
     scheduler = ExponentialLR(optimizer=optimizer, gamma=0.99)
     
     # Criterion
-    criterion = CrossEntropyLoss()
+    criterion = get_loss_criterion(conf)
 
     supervised_trainer = SupervisedTrainer(
         "my supervised trainer", 
