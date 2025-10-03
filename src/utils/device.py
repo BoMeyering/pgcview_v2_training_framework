@@ -30,7 +30,6 @@ def set_torch_device(conf: OmegaConf) -> OmegaConf:
                 logger.info("CUDA Device is not available at this time. Falling back to CPU computation.")
             conf.device = device
         elif conf.device not in ['cpu', 'cuda']:
-            print("Incorrect value set for 'conf.device'. Must be one of ['cpu', 'cuda']. Falling back to 'cpu' computation.")
             logger.info("Incorrect value set for 'conf.device'. Must be one of ['cpu', 'cuda']. Falling back to 'cpu' computation.")
             conf.device = 'cpu'
     else:

@@ -12,6 +12,7 @@ import argparse
 import torch.nn.functional as F
 from typing import Union, Optional
 from omegaconf import OmegaConf
+from src.utils.config import LossCriterion
 
 logger = logging.getLogger()
 
@@ -34,10 +35,18 @@ def get_loss_criterion(conf: OmegaConf) -> torch.nn.Module:
     loss_name = conf.loss.name.value
     LossClass = getattr(src.losses, loss_name)
 
-    # Get the valid parameters
-    loss_params = vars(conf.loss).copy()
+    # Get the loss parameters from the config
+    loss_params = conf.loss
+    # Ge the valid parameters for the loss class and filter the config params
     valid_params = inspect.signature(LossClass).parameters
     filtered_params = {k: v for k, v in loss_params.items() if k in valid_params}
+
+    # Reset the loss_type parameter to the Enum name if it exists
+    if 'loss_type' in filtered_params:
+        filtered_params['loss_type'] = LossCriterion.__members__.get(filtered_params['loss_type']).value
+    # Convert samples to a torch tensor if it exists
+    if 'samples' in filtered_params:
+        filtered_params['samples'] = torch.tensor(filtered_params['samples'])
 
     # Instnatiate the criterion
     criterion = LossClass(**filtered_params)
@@ -361,7 +370,7 @@ class ACBLoss(torch.nn.Module):
     def _effective_samples(self):
         """Helper function to calculate the effective samples and weights based on beta.
 
-        \Beta = F(f(u, v, b)) = tanh(u / (v * sqrt(b)))
+        Beta = F(f(u, v, b)) = tanh(u / (v * sqrt(b)))
         where u = log(N), v = log(C), b = -mean(log10(n_i / N_max))
         F is the squashing function tanh to ensure beta is in [0, 1)
         n_i is the number of samples for class i, and N_max is the maximum number of samples in any class. 

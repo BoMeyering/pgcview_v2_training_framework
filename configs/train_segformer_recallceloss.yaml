@@ -1,5 +1,5 @@
 # Training configs
-model_run: segformer_ce
+model_run: segformer_recallce
 
 images:
   input_channels: 3
@@ -28,7 +28,11 @@ training:
 
 # Criterion / Loss Function
 loss:
-  name: CELOSS
+  name: RECALLLOSS
+  samples: [6142392382, 3884931456, 8980100398, 1830994557, 1086317066, 1817330628, 83743094, 137097491, 476808, 13094608, 49867488, 5751402]
+  # weights: 
+  reduction: mean
+  loss_type: FOCALLOSS
 
 # Computation Device
 device: cuda
