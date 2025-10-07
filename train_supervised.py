@@ -47,8 +47,12 @@ if not os.path.exists(args.config):
 #----------------------------------------#
 # Read in the configuration file and merge with default dict
 yaml_conf = OmegaConf.load(args.config) # Load user supplied config file
+
+print(yaml_conf)
 default_conf = OmegaConf.structured(TrainSupervisedConfig) # Load the default config structure - to fill in any missing args
+print(default_conf)
 conf = OmegaConf.merge(default_conf, yaml_conf) # Any args in yaml_conf will override defaults
+
 
 # Append timestamp to run name
 set_run_name(conf)

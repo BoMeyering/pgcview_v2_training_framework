@@ -46,7 +46,10 @@ def get_loss_criterion(conf: OmegaConf) -> torch.nn.Module:
         filtered_params['loss_type'] = LossCriterion.__members__.get(filtered_params['loss_type']).value
     # Convert samples to a torch tensor if it exists
     if 'samples' in filtered_params:
-        filtered_params['samples'] = torch.tensor(filtered_params['samples'])
+        filtered_params['samples'] = torch.tensor(filtered_params['samples'], dtype=torch.float32)
+    # Convert weights to a torch tensor if it exists
+    if 'weights' in filtered_params:
+        filtered_params['weights'] = torch.tensor(filtered_params['weights'], dtype=torch.float32)
 
     # Instnatiate the criterion
     criterion = LossClass(**filtered_params)
@@ -267,7 +270,7 @@ class CBLoss(torch.nn.Module):
             ValueError: If loss_type is not one of ['CELoss', 'FocalLoss'].
         """
         super().__init__()
-        self.samples = samples.double()
+        self.samples = samples
         self.loss_type = loss_type
         self.reduction = reduction
         self.gamma = gamma
@@ -546,21 +549,22 @@ class DiceLoss(torch.nn.Module):
             raise ValueError(f"Invalid reduction mode: {reduction}. Must be one of ['mean', 'sum', 'none']")
         self.reduction = reduction
     
-    def forward(self, preds: torch.tensor, targets: torch.tensor, mask: Optional[torch.BoolTensor] = None) -> torch.tensor:
+    def forward(self, preds: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None, return_stats: bool=False) -> torch.Tensor:
         """Forward method of DiceLoss.
 
         Parameters:
         -----------
-            preds : torch.tensor
+            preds : torch.Tensor
                 The raw logits from the model of shape (N, C, H, W).
-            targets : torch.tensor
+            targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
                 A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
-
+            return_stats : bool
+                A boolean flag whether to return the intersection and union stats
         Returns:
         --------
-            loss :  torch.tensor
+            loss :  torch.Tensor
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
         # 
@@ -579,9 +583,12 @@ class DiceLoss(torch.nn.Module):
         loss = 1 - dice_score
 
         if self.reduction == 'mean':
-            return loss.mean()
+            loss = loss.mean()
         elif self.reduction == 'sum':
-            return loss.sum()
+            loss = loss.sum()
+        
+        if return_stats:
+            return loss, intersection, union
         else:
             return loss
 
