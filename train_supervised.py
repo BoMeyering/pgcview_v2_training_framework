@@ -22,6 +22,7 @@ from src.datasets import LabeledDataset, UnlabeledDataset
 from src.flexmatch import class_beta
 from src.trainer import SupervisedTrainer, FlexMatchTrainer
 from src.losses import get_loss_criterion
+from src.parameters import OptimConfig, EMA
 from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
 from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
@@ -46,8 +47,12 @@ if not os.path.exists(args.config):
 #----------------------------------------#
 # Read in the configuration file and merge with default dict
 yaml_conf = OmegaConf.load(args.config) # Load user supplied config file
+
+print(yaml_conf)
 default_conf = OmegaConf.structured(TrainSupervisedConfig) # Load the default config structure - to fill in any missing args
+print(default_conf)
 conf = OmegaConf.merge(default_conf, yaml_conf) # Any args in yaml_conf will override defaults
+
 
 # Append timestamp to run name
 set_run_name(conf)
@@ -113,25 +118,32 @@ def main(conf: omegaconf.OmegaConf=conf):
     test_loader = DataLoader(test_ds, conf.batch_size.labeled, shuffle=True)
 
     # Optimizer
-    optimizer = Adam(params=model.parameters(), lr=0.001, foreach=True)
-    # optimizer = SGD(lr=0.001, params=model.parameters(), foreach=True)
-
-    # Scheduler
-    scheduler = ExponentialLR(optimizer=optimizer, gamma=0.99)
+    optim_config = OptimConfig(conf=conf, model=model)
+    model, optimizer, scheduler = optim_config.process()
     
     # Criterion
     criterion = get_loss_criterion(conf)
 
+    # Initialize EMA if specified
+    if conf.optimizer.ema:
+        ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
+        logger.info(f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
+    else:
+        ema = None
+
+    # Initialize Trainer
     supervised_trainer = SupervisedTrainer(
-        "my supervised trainer", 
+        name="my supervised trainer", 
         conf=conf, 
         model=model, 
         train_loader=train_loader, 
         val_loader=val_loader,
+        criterion=criterion,
         optimizer=optimizer,
         scheduler=scheduler,
-        criterion=criterion)
+        ema=ema)
     
+    # Start training
     supervised_trainer.train()
     
 

@@ -24,6 +24,7 @@ from typing import Union
 from torch.utils.tensorboard import SummaryWriter
 from src.eval import AverageMeterSet
 from src.flexmatch import get_pseudo_labels
+from src.parameters import EMA
 # from src.callbacks import ModelCheckpoint
 from src.metrics import MetricLogger
 from src.transforms import get_strong_transforms
@@ -204,7 +205,7 @@ class FlexMatchTrainer(Trainer):
         self.val_metrics.reset()
 
         # Set progress bar and unpack batches
-        p_bar = tqdm(range(self.train_length))
+        p_bar = tqdm(range(self.train_length), colour='yellow')
         train_l_loader, train_u_loader = self.train_loaders
 
         # Reinstantiate iterator loaders
@@ -343,7 +344,7 @@ class FlexMatchTrainer(Trainer):
         self.meters.reset()
 
         # Set progress bar and unpack batches
-        p_bar = tqdm(range(len(self.val_loader)))
+        p_bar = tqdm(range(len(self.val_loader)), colour='blue')
         for batch_idx, batch in enumerate(self.val_loader):
 
             # Validate one batch
@@ -426,20 +427,20 @@ class FlexMatchTrainer(Trainer):
 class SupervisedTrainer(Trainer):
     def __init__(
         self,
-        name,
+        name: str,
         conf: OmegaConf,
         model: torch.nn.Module,
-        train_loader,
-        val_loader,
-        optimizer,
-        criterion,
-        scheduler=None,
-        ema=None,
+        train_loader: torch.utils.data.DataLoader,
+        val_loader: torch.utils.data.DataLoader,
+        criterion: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler=None,
+        ema: EMA=None,
         # tb_logger: torch.utils.tensorboard.writer.SummaryWriter = None,
-        class_map: dict = None,
+        class_map: dict=None,
     ):
         super().__init__(name=name) # Initialize the name and AverageMeterSet
-        self.trainer_id = "_".join(["supervised_trainer", str(uuid.uuid4())])
+        self.trainer_id = "_".join([name, str(uuid.uuid4())])
         self.conf = conf
         self.model = model
         self.train_loader = train_loader
@@ -448,17 +449,9 @@ class SupervisedTrainer(Trainer):
         self.criterion = criterion
         self.scheduler = scheduler
         self.ema = ema
-        # self.logger = logging.getLogger()
+        self.logger = logging.getLogger()
         # self.tb_logger = tb_logger
-        self.class_map = class_map
-
-        # torch.distributed stuff
-        # try:
-        #     self.rank = dist.get_rank()
-        # except ValueError:
-        #     self.rank = 0
-        # except RuntimeError:
-        #     self.rank = 0
+        # self.class_map = class_map
 
         # Set up metrics class
         self.train_metrics = MetricLogger(
@@ -471,8 +464,14 @@ class SupervisedTrainer(Trainer):
         checkpoint_path = Path(self.conf.directories.checkpoint_dir) / self.conf.model_run
         # self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.conf), monitor='train_loss')
 
-    def _train_step(self, batch: Tuple):
-        """ Train over one batch """
+    def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]):
+        """Train over one batch
+        
+        parameters:
+        -----------
+            batch : Tuple[torch.Tensor, torch.Tensor]
+                A batch of images and targets from the training DataLoader.
+        """
         # Unpack batch and send to device
         img, targets = batch
         inputs = img.to(self.conf.device)
@@ -503,7 +502,7 @@ class SupervisedTrainer(Trainer):
         self.train_metrics.reset()
 
         # Set progress bar and unpack batches
-        p_bar = tqdm(range(len(self.train_loader)))
+        p_bar = tqdm(range(len(self.train_loader)), colour='yellow')
 
         # Iterate through the batches
         for batch_idx, batch in enumerate(self.train_loader):
@@ -517,8 +516,9 @@ class SupervisedTrainer(Trainer):
 
             # Step optimizer and update parameters for EMA
             self.optimizer.step()
-            if self.ema:
-                self.ema.update()
+
+            if self.ema is not None:
+                self.ema.update_params()
 
             # Update progress bar
             p_bar.set_description(
@@ -619,7 +619,7 @@ class SupervisedTrainer(Trainer):
         self.meters.reset()
 
         # Set progress bar and unpack batches
-        p_bar = tqdm(range(len(self.val_loader)))
+        p_bar = tqdm(range(len(self.val_loader)), colour='blue')
 
         # Iterate through the batches
         for batch_idx, batch in enumerate(self.val_loader):

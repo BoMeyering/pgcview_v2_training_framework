@@ -10,7 +10,7 @@ import datetime
 from dataclasses import dataclass, field
 from omegaconf import OmegaConf
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
 class ModelArchitecture(Enum):
     """
@@ -69,10 +69,11 @@ class Training:
 @dataclass
 class Loss:
     name: LossCriterion=LossCriterion.CELOSS
-    # samples: List[float]=field(default_factory=list)
-    # weights: List[float]=field(default_factory=list)
+    samples: Optional[List[float]]=field(default_factory=list)
+    weights: Optional[List[float]]=field(default_factory=list)
+    use_weights: bool=False
     reduction: str='mean'
-    # loss_type: str
+    loss_type: str='CELOSS'
 
 @dataclass
 class BatchSize:
@@ -86,20 +87,40 @@ class FlexMatch:
     warmup: bool=True
 
 @dataclass
-class ModelConfig:
-    encoder_name: str='resnet18'
-    encoder_depth: int=5
-    encoder_weights: str='imagenet'
-    input_channels: int=3
-    classes: int=3
+class SMPModelConfig:
+    encoder_name: Optional[str]=None
+    encoder_depth: Optional[int]=None
+    encoder_weights: Optional[str]='imagenet'
+    input_channels: Optional[int]=None
+    classes: Optional[int]=None
 
 @dataclass
 class Model:
     architecture: ModelArchitecture=ModelArchitecture.UNET
-    config: ModelConfig=field(default_factory=ModelConfig)
-    weight_decay: float=0.9
+    config: SMPModelConfig=field(default_factory=SMPModelConfig)
+    # weight_decay: float=0.9
     filter_bias_and_bn: bool=True
 
+@dataclass
+class Optimizer:
+    name: str='SGD'
+    lr: float=0.001
+    weight_decay: float=0.0001
+    filter_bias_and_bn: bool=True
+    nesterov: bool=True
+    ema: bool=True
+    ema_decay: float=0.9
+    gamma: float=0.99
+    original_weight_decay: float=0.0001 # Used internally if filter_bias_and_bn is True
+
+@dataclass
+class Scheduler:
+    name: str='ExponentialLR'
+    step_size: int=1
+    gamma: float=0.99
+    T_max: int=50
+    eta_min: float=0.0001
+    last_epoch: int=-1
 
 @dataclass
 class Norm:
@@ -122,6 +143,8 @@ class TrainSupervisedConfig:
     batch_size: BatchSize=field(default_factory=BatchSize)
     flexmatch: FlexMatch=field(default_factory=FlexMatch)
     model: Model=field(default_factory=Model)
+    optimizer: Optimizer=field(default_factory=Optimizer)
+    scheduler: Scheduler=field(default_factory=Scheduler)
     metadata: Metadata=field(default_factory=Metadata)
     logging_level: str='INFO'
 
