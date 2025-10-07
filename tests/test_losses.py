@@ -438,9 +438,9 @@ class TestMaskOperations(unittest.TestCase):
                 loss_1, int_1, union_1 = loss_fn(self.logits, self.targets, mask, return_stats=True)
                 loss_2, int_2, union_2 = loss_fn(self.logits, self.targets, anti_mask, return_stats=True)
                 
-                # Assert that the masked and anit-masked losses equal the unmasked loss
+                # Assert that the masked and anit-masked losses equal the unmasked lossS
                 self.assertAlmostEqual(int_0.sum().item(), (int_1 + int_2).sum().item(), places=3)
-                self.assertAlmostEqual(union_0.sum().item(), (union_1 + union_2).sum().item()places=3)
+                self.assertAlmostEqual(union_0.sum().item(), (union_1 + union_2).sum().item(), places=3)
             elif 'tversky' in name:
                 pass
             else:
