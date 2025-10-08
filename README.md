@@ -1,5 +1,5 @@
 # PGC View V2 - Training Framework
-This repo exists to hold the model training and test inference code for the PGC View V2 image analysis pipeline
+This repo holds the model training and test inference code for the PGC View V2 image analysis pipeline
 
 Since our dataset is largely unlabeled and unbalanced, we are using a modified version of the FlexMatch semi-supervised learning algorithm to train the segmentation models. You can read the original publication here: [FlexMatch: Boosting Semi-Supervised Learning with Curriculum Pseudo Labeling](https://arxiv.org/abs/2110.08263)
 
