@@ -5,55 +5,76 @@ BoMeyering 2025
 """
 
 import random
+from collections import deque
 import numpy as np
 import logging
 import torch
 from torchmetrics import MetricCollection
 from torchmetrics.segmentation import MeanIoU, GeneralizedDiceScore, HausdorffDistance
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Sequence, Iterable
+from numbers import Real
+from abc import ABC, abstractmethod
 
 logger = logging.getLogger()
 
+class Meter(ABC):
+    """Abstract base class for metric accumulators."""
 
-class ValueMeter:
-    """ A class to handle any numerical values """
-
-    def __init__(self):
+    def __init__(self) -> None:
         self._values = []
 
-    def update(self, val: float, n: int=1):
-        """ Update the value list with new item(s) """
-        self._values.extend([val]*n)
-    
-    def reset(self):
-        """ Reset the value meter """
+    @abstractmethod
+    def update(self, val: Real, *args, **kwargs) -> None:
+        """Update the meter with a new value (and optional count)."""
+        ...
+
+    def reset(self) -> None:
+        """ Reset internal state """
         self._values.clear()
-    
+
     @property
-    def mean(self):
-        """ Retrieve the mean of the values"""
-        if len(self._values) == 0:
-            return
-        return sum(self._values) / len(self._values)
-    
+    def mean(self) -> Optional[Real]:
+        """ Mean of tracked values (or None if empty) """
+        if not self._values:
+            return None
+        return float(sum(self._values) / len(self._values))
+
     @property
-    def min(self):
-        """ Retrieve the minimum value """
-        if len(self._values) == 0:
-            return
+    def min(self) -> Optional[Real]:
+        """Minimum of tracked values (or None if empty)."""
+        if not self._values:
+            return None
         return min(self._values)
-    
+
     @property
-    def max(self):
-        """ Retrieve the maximum value """
-        if len(self._values) == 0:
-            return
+    def max(self) -> Optional[Real]:
+        """Maximum of tracked values (or None if empty)."""
+        if not self._values:
+            return None
         return max(self._values)
 
     @property
-    def values(self):
-        """ Retrieve the entire list of values """
+    def values(self) -> Sequence[Real]:
+        """All tracked values."""
         return self._values
+
+class ValueMeter(Meter):
+    """ A class to handle any numerical values """
+
+    def __init__(self):
+        super().__init__()
+
+    def update(self, val: Real, n: int=1):
+        """Append `val` to the list `n` times."""
+        if not isinstance(val, (float, int)):
+            raise ValueError(
+                f"Argument 'val' must be a numeric data type; got {type(val)} instead."
+            )
+        if not isinstance(n, int) or n < 1:
+            raise ValueError(
+                f"Argument 'n' must be a positive integer; got {type(n)} instead."
+            )
+        self._values.extend([val]*n)
     
     def __str__(self):
         """ Implement str format """
@@ -68,35 +89,118 @@ class ValueMeter:
             last = ", ".join(map(str, self._values[-3:]))
             return f"ValueMeter(values=[{first}, ..., {last}], len={len(self._values)})"
     
-class ValueMeterSet:
-    """ ValueMeterSet manages a group of ValueMeter instances """
-    def __init__(self):
-        self.meters = {}
+class RunningAvgMeter(Meter):
+    def __init__(self, window_length: int=10):
+        """Initialize the RunningAvgMeter
 
+        parameters:
+        -----------
+            window_length : int
+                The number of numeric elements to include in the running average. Defaults to 10.        
+        """
+        super().__init__()
+        if not isinstance(window_length, (float, int)):
+            raise ValueError(
+                f"Argument 'window_length' must be a scalar numeric data type"
+            )
+        # Clip window_length between 2 and 100
+        wl = int(window_length)
+        wl = max(2, min(wl, 100))
+        # Create the deque
+        self._values = deque(maxlen=wl)
+
+    def update(self, val: Real, *args):
+        """ Update the deque with a new value """
+        if not isinstance(val, (float, int)):
+            raise ValueError(
+                f"Argument 'val' must be a numeric data type; got {type(val)} instead."
+            )
+        self._values.append(val)
+
+    def __str__(self):
+        """ Implement str format """
+        return f"Mean: {self.mean} - Min: {self.min} - Max: {self.max}"
+    
+    def __repr__(self):
+        """ Implement object representation """
+        if len(self._values) <= 10:
+            return f"RunningAvgMeter(values={self._values}, len={len(self._values)})"
+        else:
+            first = ", ".join(map(str, list(self._values)[:3]))
+            last = ", ".join(map(str, list(self._values)[-3:]))
+            return f"RunningAvgMeter(values=[{first}, ..., {last}], len={len(self._values)})"
+
+class MeterSet:
+    """ MeterSet manages a group of abstract Meter instances """
+    def __init__(self, meter_dict: dict[str, Meter]):
+        
+        if not isinstance(meter_dict, dict):
+            raise ValueError(
+                f"Parameter 'meter_dict' must be a dictionary with meter names as keys and values of type abstract class Meter"
+            )
+        
+        for k, v in meter_dict.items():
+            if not isinstance(v, (Meter, ValueMeter, RunningAvgMeter)):
+                raise ValueError(
+                    f"All values in parameter 'meter_dict' must be of base type Meter"
+                )
+        
+        self.meters = meter_dict
+    
     def __getitem__(self, name: str):
         try:
             return self.meters[name]
         except KeyError:
             raise KeyError(f"No meter named '{name}'. Existing: {list(self.meters)}")
+        
+    def _add_one_meter(self, name: str, meter_type: str, **kwargs):
+        """ Add another meter to the MeterSet """
+        if name in self.meters.keys():
+            raise KeyError(
+                f"A meter named {name} is already present in the MeterSet. Please choose a different key."
+            )
+        wl = kwargs['window_length'] if 'window_length' in kwargs else 10
+
+        if meter_type == 'value':
+            meter = ValueMeter()
+        elif meter_type == 'running_avg':
+            meter = RunningAvgMeter(window_length=wl)
+        else:
+            raise ValueError(
+                f"Parameter 'meter_type' must be one of ['value', 'running_avg']. Got {type(meter_type)} instead."
+            )
+        
+        self.meters[name] = meter
 
     def _update_one_meter(self, name: str, val: float, n: int = 1):
-        if name not in self.meters:
-            self.meters[name] = ValueMeter()
         # assumes ValueMeter.update(value, n=1) exists
         self.meters[name].update(val, n)
+    
+    def _delete_one_meter(self, name: str):
+        """ Delete one meter from the set """
+
+        if name in self.meters.keys():
+            del self.meters[name]
+        else:
+            logger.warning(f"Key {name} not found in self.meters.keys().")
 
     def update(self, val_dict: dict):
         if not isinstance(val_dict, dict):
             raise ValueError("'val_dict' must be a valid dictionary")
         for k, v in val_dict.items():
-            self._update_one_meter(k, v.get('val'), v.get('n', 1))
+            self._update_one_meter(name=k, val=v.get('val'), n=v.get('n', 1))
 
     def reset(self, name: Optional[str] = None):
+        """ Reset all Meters in the set """
         if name is not None:
             self[name].reset()
         else:
             for meter in self.meters.values():
                 meter.reset()
+
+    def clear(self):
+        """ Remove all Meters from the MeterSet """
+        self.meters = {}
 
     def values(self, name: Optional[str] = None, postfix: str = ""):
         if name is not None:
@@ -188,17 +292,4 @@ class MetricLogger:
         """ Rest Metric Collections """
         self.avg_metrics.reset()
         self.mc_metrrics.reset()
-
-if __name__ == '__main__':
-
-    logits = torch.randn(10, 4, 10, 10)
-    targets = torch.randint(0, 4, (10, 10, 10))
-
-    ml = MetricLogger(num_classes=4, device='cpu')
-
-    ml.update(preds=logits, targets=targets)
-
-    ml.compute()
-
-    print(ml.results)
 
