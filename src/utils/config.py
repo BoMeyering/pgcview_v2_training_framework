@@ -108,9 +108,11 @@ class Optimizer:
     weight_decay: float=0.0001
     filter_bias_and_bn: bool=True
     nesterov: bool=True
+    momentum: float=0.9
     ema: bool=True
     ema_decay: float=0.9
     gamma: float=0.99
+
     original_weight_decay: float=0.0001 # Used internally if filter_bias_and_bn is True
 
 @dataclass
@@ -140,6 +142,9 @@ class TrainSupervisedConfig:
     training: Training=field(default_factory=Training)
     loss: Loss=field(default_factory=Loss)
     device: str='cpu'
+    rank: int=0
+    local_rank: int=0
+    world_size: int=1
     batch_size: BatchSize=field(default_factory=BatchSize)
     flexmatch: FlexMatch=field(default_factory=FlexMatch)
     model: Model=field(default_factory=Model)

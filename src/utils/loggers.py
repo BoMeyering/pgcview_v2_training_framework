@@ -9,6 +9,7 @@ import sys
 import omegaconf
 from pathlib import Path
 from omegaconf import OmegaConf
+from contextlib import contextmanager
 
 def setup_loggers(conf):
     """
@@ -30,3 +31,20 @@ def setup_loggers(conf):
     root_logger.addHandler(file_handler)
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(conf.logging_level)
+
+def rank_log(local_rank: int, fn, *args, **kwargs):
+    """Log a message only on rank 0 process
+    
+    Parameters:
+    -----------
+        local_rank : int
+            The local rank of the process.
+        fn : logging.logger method
+            The logging.logger call function
+        *args
+            The positional arguments for the logger call
+        **kwargs
+            The keyword argumes for the logger call
+    """
+    if local_rank == 0:
+        fn(*args, **kwargs)

@@ -21,7 +21,7 @@ training:
   epochs: 10
   # optim_name:
   lr: 0.001
-  # momentum:
+  momentum: .9
   # beta1:
   # beta2:
   nesterov: True
@@ -35,7 +35,7 @@ loss:
   # loss_type: CELOSS
 
 # Computation Device
-device: cuda
+device: cpu
 
 # Batch Sizes
 batch_size:

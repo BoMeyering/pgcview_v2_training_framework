@@ -291,5 +291,5 @@ class MetricLogger:
     def reset(self):
         """ Rest Metric Collections """
         self.avg_metrics.reset()
-        self.mc_metrrics.reset()
+        self.mc_metrics.reset()
 

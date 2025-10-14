@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn import CrossEntropyLoss
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 # Local imports
 from src.models import create_smp_model
@@ -26,7 +27,8 @@ from src.parameters import OptimConfig, EMA
 from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
 from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
-from src.utils.loggers import setup_loggers
+from src.utils.loggers import setup_loggers, rank_log
+from src.distributed import set_env_ranks, setup_ddp
 
 
 # Create a parser for command line arguments
@@ -36,23 +38,26 @@ parser = ArgumentParser(
 )
 # Add arguments for config file and then parse CLI args
 parser.add_argument('-c', '--config', type=str, help="The path to the training config YAML file.", default='configs/train_config.yaml')
+parser.add_argument('-b', '--backend', type=str, help="The backend to use for torchrun. Defaults to 'gloo'", default='gloo')
 args = parser.parse_args()
 
 if not os.path.exists(args.config):
     raise FileNotFoundError(f"The path to the configuration file {args.config} was not found.")
 
+# Set the backend engine for torchrun
+backend = args.backend
+setup_ddp(backend=backend)
 
 #----------------------------------------#
 # Set up configuration objects
 #----------------------------------------#
 # Read in the configuration file and merge with default dict
 yaml_conf = OmegaConf.load(args.config) # Load user supplied config file
-
-print(yaml_conf)
 default_conf = OmegaConf.structured(TrainSupervisedConfig) # Load the default config structure - to fill in any missing args
-print(default_conf)
 conf = OmegaConf.merge(default_conf, yaml_conf) # Any args in yaml_conf will override defaults
 
+# Set the ranks and world_size
+set_env_ranks(conf)
 
 # Append timestamp to run name
 set_run_name(conf)
@@ -63,6 +68,7 @@ logger = logging.getLogger()
 
 # Set torch device
 set_torch_device(conf)
+# FIGURE OUT HOW TO PASS local_rank to torch.device('cuda', local_rank) for conf
 
 # Set data normalization values
 set_normalization_values(conf)
@@ -84,12 +90,14 @@ def main(conf: omegaconf.OmegaConf=conf):
     """
 
     # Log training
-    logger.info("Current Training Configuration")
-    logger.info("Training Configuration\n"+OmegaConf.to_yaml(conf))
+    rank_log(conf.local_rank, logger.info, "Current Training Configuration")
+    rank_log(conf.local_rank, logger.info, "Training Configuration\n"+OmegaConf.to_yaml(conf))
 
-    # Create model
+    # Create and wrap model for DDP
     model = create_smp_model(conf=conf).to(conf.device)
-    logger.info(f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
+    model = DDP(model, device_ids=[conf.local_rank] if conf.device=='cuda' else None, output_device=conf.local_rank if conf.device=='cuda' else None, find_unused_parameters=False)
+
+    rank_log(conf.local_rank, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
 
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
@@ -127,7 +135,7 @@ def main(conf: omegaconf.OmegaConf=conf):
     # Initialize EMA if specified
     if conf.optimizer.ema:
         ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
-        logger.info(f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
+        rank_log(conf.local_rank, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
     else:
         ema = None
 
