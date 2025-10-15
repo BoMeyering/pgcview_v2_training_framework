@@ -11,7 +11,7 @@ import argparse
 import omegaconf
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
 from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn import CrossEntropyLoss
@@ -22,13 +22,15 @@ from src.models import create_smp_model
 from src.datasets import LabeledDataset, UnlabeledDataset
 from src.flexmatch import class_beta
 from src.trainer import SupervisedTrainer, FlexMatchTrainer
-from src.losses import get_loss_criterion
+from src.metrics import MetricLogger, MeterSet, RunningAvgMeter, ValueMeter
+from src.losses import get_loss_criterion, read_class_counts
 from src.parameters import OptimConfig, EMA
 from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
 from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
 from src.utils.loggers import setup_loggers, rank_log
 from src.distributed import set_env_ranks, setup_ddp
+
 
 
 # Create a parser for command line arguments
@@ -66,12 +68,15 @@ set_run_name(conf)
 setup_loggers(conf)
 logger = logging.getLogger()
 
-# Set torch device
+# Set torch device - will set conf.device as 'TYPE:LOCAL_RANK' e.g. 'cuda:0', 'cpu:2' etc
 set_torch_device(conf)
-# FIGURE OUT HOW TO PASS local_rank to torch.device('cuda', local_rank) for conf
 
 # Set data normalization values
 set_normalization_values(conf)
+
+# Read class counts from file
+samples, inv_weights = read_class_counts(conf.loss.class_sample_count_path)
+conf.loss.samples, conf.loss.weights = samples, inv_weights
 
 #----------------------------------------#
 # Main entry point
@@ -90,14 +95,18 @@ def main(conf: omegaconf.OmegaConf=conf):
     """
 
     # Log training
-    rank_log(conf.local_rank, logger.info, "Current Training Configuration")
-    rank_log(conf.local_rank, logger.info, "Training Configuration\n"+OmegaConf.to_yaml(conf))
+    rank_log(conf.local_rank, logger.info, "Current Training Configurration\n"+OmegaConf.to_yaml(conf))
 
     # Create and wrap model for DDP
     model = create_smp_model(conf=conf).to(conf.device)
-    model = DDP(model, device_ids=[conf.local_rank] if conf.device=='cuda' else None, output_device=conf.local_rank if conf.device=='cuda' else None, find_unused_parameters=False)
-
-    rank_log(conf.local_rank, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
+    model = DDP(
+        model, 
+        device_ids=[conf.local_rank] if 'cuda' in conf.device else None, 
+        output_device=conf.local_rank if 'cuda' in conf.device else None, 
+        find_unused_parameters=True
+    )
+    rank_log(conf.local_rank, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name} and placed on device {conf.device}")
+    rank_log(conf.local_rank, logger.info, f"Other processes have the model placed on device 'device.type:local_rank'")
 
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
@@ -120,10 +129,45 @@ def main(conf: omegaconf.OmegaConf=conf):
         transforms=test_transforms
     )
 
+    # Create distributed Samplers
+    train_sampler = DistributedSampler(
+        dataset=train_ds, 
+        rank=conf.local_rank, 
+        shuffle=True, 
+        drop_last=True
+    )
+    val_sampler = DistributedSampler(
+        dataset=val_ds, 
+        rank=conf.local_rank, 
+        shuffle=False, 
+        drop_last=False
+    )
+    test_sampler = DistributedSampler(
+        dataset=test_ds, 
+        rank=conf.local_rank, 
+        shuffle=False, 
+        drop_last=False
+    )
+    
     # Create DataLoaders
-    train_loader = DataLoader(train_ds, conf.batch_size.labeled, shuffle=True)
-    val_loader = DataLoader(val_ds, conf.batch_size.labeled, shuffle=True)
-    test_loader = DataLoader(test_ds, conf.batch_size.labeled, shuffle=True)
+    train_loader = DataLoader(
+        dataset=train_ds, 
+        batch_size=conf.batch_size.labeled, 
+        shuffle=False,
+        sampler=train_sampler
+    )
+    val_loader = DataLoader(
+        dataset=val_ds, 
+        batch_size=conf.batch_size.labeled,
+        shuffle=False,
+        sampler=val_sampler
+    )
+    test_loader = DataLoader(
+        dataset=test_ds, 
+        batch_size=conf.batch_size.labeled, 
+        shuffle=False,
+        sampler=test_sampler
+    )
 
     # Optimizer
     optim_config = OptimConfig(conf=conf, model=model)
@@ -139,9 +183,18 @@ def main(conf: omegaconf.OmegaConf=conf):
     else:
         ema = None
 
+    # Create MeterSet
+    meters = MeterSet({
+        'train_loss': ValueMeter(),
+        'val_loss': ValueMeter(),
+        'train_loss_smooth': RunningAvgMeter(window_length=15),
+        'val_loss_smooth': RunningAvgMeter(window_length=15)
+    })
+
     # Initialize Trainer
     supervised_trainer = SupervisedTrainer(
-        name="my supervised trainer", 
+        name="my supervised trainer",
+        meter_set=meters,
         conf=conf, 
         model=model, 
         train_loader=train_loader, 

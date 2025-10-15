@@ -6,15 +6,68 @@ BoMeyering 2025
 
 import torch
 import src
+import json
 import logging
 import inspect
 import argparse
 import torch.nn.functional as F
+from json.decoder import JSONDecodeError
+from pathlib import Path
 from typing import Union, Optional
 from omegaconf import OmegaConf
 from src.utils.config import LossCriterion
+from src.utils.loggers import rank_log
 
 logger = logging.getLogger()
+
+def read_class_counts(filepath: Union[str, Path]=Path('metadata/class_sample_counts.json')):
+    """Read in a class count JSON file
+
+    Load the calculated class pixel counts and return a list of sample counts as well as inverse weights
+
+    Parameters:
+    -----------
+        filepath : Union[str, Path]
+            The path to the sample counts JSON file. Defaults to 'metadata/class_sample_counts.json'
+    
+    Returns:
+    --------
+        samples : list
+            The list of sample pixel counts ordered by class index
+        inv_weights : list
+            The list of inverse class weights ordered by class index
+    """
+    # Check type
+    if not isinstance(filepath, (str, Path)):
+        raise ValueError(
+            f"'filepath' must be a valid string or pathlib.Path object; got {type(filepath)} instead."
+        )
+    # Convert to Path
+    filepath = Path(filepath)
+    # Check that path exits
+    if not filepath.exists():
+        raise FileExistsError(
+            f"Filepath {str(filepath)} does not exist. Please check path integrity."
+        )
+    # Check file extension
+    if filepath.suffix.lower() != '.json':
+        print(filepath.suffix.lower())
+        raise ValueError(
+            "File must be a valid json file"
+        )
+    
+    try:
+        with open(filepath, 'r') as f:
+            count_dict = json.load(f)
+            samples = [val['pixel_count'] for key, val, in count_dict.items()]
+            inv_weights = [1/(x/sum(samples)) for x in samples]
+
+            return samples, inv_weights
+        
+    except JSONDecodeError as e:
+        logger.error(f"Error decoding JSON file. Error: {e}")
+
+        return None, None
 
 def get_loss_criterion(conf: OmegaConf) -> torch.nn.Module:
     """

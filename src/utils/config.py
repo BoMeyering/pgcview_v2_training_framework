@@ -4,13 +4,15 @@ Configuration File Validation script
 BoMeyering 2025
 """
 
+import torch
 import omegaconf
 import logging
 import datetime
 from dataclasses import dataclass, field
 from omegaconf import OmegaConf
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Union
+
 
 class ModelArchitecture(Enum):
     """
@@ -69,6 +71,7 @@ class Training:
 @dataclass
 class Loss:
     name: LossCriterion=LossCriterion.CELOSS
+    class_sample_count_path: str='metadata/class_sample_counts.json'
     samples: Optional[List[float]]=field(default_factory=list)
     weights: Optional[List[float]]=field(default_factory=list)
     use_weights: bool=False

@@ -415,3 +415,7 @@ class TestMeterSet(unittest.TestCase):
         for k, v in values.items():
             self.assertIsNotNone(v)
             self.assertGreaterEqual(len(v), 10)
+
+
+if __name__ == "__main__":
+    pass

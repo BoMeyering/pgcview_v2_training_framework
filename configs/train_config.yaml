@@ -29,17 +29,19 @@ training:
 # Criterion / Loss Function
 loss:
   name: CELOSS
-  # samples: 
-  # weights: 
+  class_sample_count_path: 'metadata/class_sample_counts.json'
+  samples: 
+  weights: 
+  use_weights: false
   reduction: mean
-  # loss_type: CELOSS
+  loss_type: CELOSS
 
 # Computation Device
-device: cpu
+device: cuda
 
 # Batch Sizes
 batch_size:
-  labeled: 4
+  labeled: 2
   unlabeled: 2
 
 # Flexmatch
@@ -50,9 +52,9 @@ flexmatch:
 
 # Model Architecture
 model:
-  architecture: SEGFORMER
+  architecture: UNET
   config:
-    encoder_name: efficientnet-b3
+    encoder_name: efficientnet-b0
     encoder_depth: 5
     encoder_weights: imagenet
     input_channels: 3

@@ -1,31 +1,31 @@
 {
     "soil": {
         "class_idx": 0,
-        "pixel_count": 6311198483
+        "pixel_count": 6351473468
     },
     "stover": {
         "class_idx": 1,
-        "pixel_count": 4273753896
+        "pixel_count": 4306878840
     },
     "pgc": {
         "class_idx": 2,
-        "pixel_count": 9308267604
+        "pixel_count": 9355991809
     },
     "weed": {
         "class_idx": 3,
-        "pixel_count": 1883286285
+        "pixel_count": 1929005577
     },
     "corn": {
         "class_idx": 4,
-        "pixel_count": 1114720577
+        "pixel_count": 1123526783
     },
     "soybean": {
         "class_idx": 5,
-        "pixel_count": 2922582749
+        "pixel_count": 2928697001
     },
     "marker": {
         "class_idx": 6,
-        "pixel_count": 84457694
+        "pixel_count": 85185280
     },
     "quadrat": {
         "class_idx": 7,
@@ -37,14 +37,14 @@
     },
     "namecard": {
         "class_idx": 9,
-        "pixel_count": 13094608
+        "pixel_count": 13501062
     },
     "person": {
         "class_idx": 10,
-        "pixel_count": 69549961
+        "pixel_count": 69851888
     },
     "marking_flag": {
         "class_idx": 11,
-        "pixel_count": 5896662
+        "pixel_count": 5929323
     }
 }
