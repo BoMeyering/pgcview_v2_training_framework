@@ -1,0 +1,64 @@
+# Training configs
+model_run: segformer_ce
+
+images:
+  input_channels: 3
+  resize: [1024, 1024]
+
+# Directories
+directories:
+  # train_labeled_dir: data/toy_dataset/train/labeleds
+  train_labeled_dir: data/raw/labeled
+  train_unlabeled_dir: data/toy_dataset/train/unlabeled
+  val_dir: data/toy_dataset/val
+  test_dir: data/toy_dataset/test
+  output_dir: outputs
+  checkpoint_dir: model_checkpoints
+  log_dir: logs/run_logs
+
+# Optimizer
+training:
+  epochs: 10
+  # optim_name:
+  lr: 0.001
+  # momentum:
+  # beta1:
+  # beta2:
+  nesterov: True
+
+# Criterion / Loss Function
+loss:
+  name: CELOSS
+
+# Computation Device
+device: cuda
+
+# Batch Sizes
+batch_size:
+  labeled: 4
+  unlabeled: 2
+
+# Flexmatch
+flexmatch:
+  tau: 0.95
+  mapping: linear
+  warmup: True
+
+# Model Architecture
+model:
+  architecture: SEGFORMER
+  config:
+    encoder_name: efficientnet-b3
+    encoder_depth: 5
+    encoder_weights: imagenet
+    input_channels: 3
+    classes: 12
+  # weight_decay:
+  filter_bias_and_bn: True
+
+# Metadata for normalization
+metadata:
+  norm_path: metadata/dataset_norm.json
+
+# Logging
+logging_level: DEBUG
