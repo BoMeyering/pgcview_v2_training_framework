@@ -11,6 +11,7 @@ import logging
 import torch.nn as nn
 from contextlib import contextmanager
 from typing import List, Tuple, Optional, Any
+from src.utils.loggers import rank_log
 
 # Set up logger
 logger = logging.getLogger()
@@ -114,7 +115,7 @@ class OptimConfig:
         filter_bias_and_bn = bool(self.optim_params.filter_bias_and_bn) if self.optim_params.filter_bias_and_bn is not None else False
 
         if weight_decay > 0.0 and filter_bias_and_bn:
-            logger.info(f"Applying weight decay={weight_decay} to model parameters. Bias and norm parameters will not be decayed.")
+            rank_log(self.conf.local_rank, logger.info, f"Applying weight decay={weight_decay} to model parameters. Bias and norm parameters will not be decayed.")
 
             parameters = self._add_weight_decay(weight_decay)
             # Stash original weight decay and set to 0
@@ -123,7 +124,7 @@ class OptimConfig:
 
             return parameters, 0.0
         else:
-            logger.info(f"Applying weight decay={weight_decay} to all model parameters.")
+            rank_log(self.conf.local_rank, logger.info, f"Applying weight decay={weight_decay} to all model parameters.")
             return list(self._iter_trainable_params()), weight_decay
 
 
@@ -140,12 +141,12 @@ class OptimConfig:
 
         try:
             OptimClass = getattr(torch.optim, self.optim_params.name)
-            logger.info(f"Using optimizer class {self.optim_params.name} from torch.optim")
+            rank_log(self.conf.local_rank, logger.info, f"Using optimizer class {self.optim_params.name} from torch.optim")
         except AttributeError:
             valid_optim = [attr for attr in dir(torch.optim) if not attr.startswith("_") and inspect.isclass(getattr(torch.optim, attr))]
-            logger.warning(f"The optimizer {self.optim_params.name} is not in ```torch.optim```")
-            logger.warning(f"Must be one of {valid_optim}")
-            logger.info("Defaulting to torch.optim.SGD.")
+            rank_log(self.conf.local_rank, logger.warning, f"The optimizer {self.optim_params.name} is not in ```torch.optim```")
+            rank_log(self.conf.local_rank, logger.warning, f"Must be one of {valid_optim}")
+            rank_log(self.conf.local_rank, logger.info, "Defaulting to torch.optim.SGD.")
             OptimClass = torch.optim.SGD
         
         # Grab the valid parameters for the optimizer class and filter
@@ -158,7 +159,7 @@ class OptimConfig:
 
         # Instantiate the optimizer
         optimizer = OptimClass(**optim_params)
-        logger.info(f"Instantiated optimizer {self.optim_params.name}")  
+        rank_log(self.conf.local_rank, logger.info, f"Instantiated optimizer {self.optim_params.name}")
         self.optimizer = optimizer
 
         return optimizer
@@ -181,9 +182,10 @@ class OptimConfig:
                 and not attr.startswith("_")
                 and inspect.isclass(getattr(torch.optim.lr_scheduler, attr))
             ]
-            logger.error(f"The LR scheduler {self.scheduler_params.name} is not in ```torch.optim.lr_scheduler```")
-            logger.error(f"Must be one of {valid_sched}")
-            logger.info("Defaulting to torch.optim.lr_scheduler.LinearLR.")
+            rank_log(self.conf.local_rank, logger.error, f"The LR scheduler {self.scheduler_params.name} is not in ```torch.optim.lr_scheduler```")
+            rank_log(self.conf.local_rank, logger.error, f"Must be one of {valid_sched}")
+            rank_log(self.conf.local_rank, logger.info, "Defaulting to torch.optim.lr_scheduler.LinearLR.")
+
             SchedClass = torch.optim.lr_scheduler.LinearLR
 
         # Grab the valid parameters for the scheduler class and filter
@@ -284,8 +286,9 @@ class EMA:
         """
         self.update_params()
         self.assign_params()
-        if self.verbose:
-            logger.info("Model 'live' parameters stashed and model updated with shadow params")
+        # if self.verbose:
+        #     rank_log(self.conf.local)
+        #     logger.info("Model 'live' parameters stashed and model updated with shadow params")
 
     def restore_params(self):
         """
@@ -294,8 +297,8 @@ class EMA:
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 param.data.copy_(self.original_params[name].data)
-        if self.verbose:
-            logger.info("Model 'live' parameters restored from stashed params")
+        # if self.verbose:
+        #     logger.info("Model 'live' parameters restored from stashed params")
 
 @contextmanager
 def apply_ema(ema):

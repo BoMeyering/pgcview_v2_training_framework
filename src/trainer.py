@@ -22,42 +22,47 @@ import numpy as np
 
 from typing import Union
 from torch.utils.tensorboard import SummaryWriter
-from src.eval import AverageMeterSet
 from src.flexmatch import get_pseudo_labels
 from src.parameters import EMA
 # from src.callbacks import ModelCheckpoint
-from src.metrics import MetricLogger
+from src.metrics import MetricLogger, MeterSet, RunningAvgMeter, ValueMeter
 from src.transforms import get_strong_transforms
+
+
 
 
 class Trainer(ABC):
     """Abstract Trainer Class"""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, meter_set: MeterSet):
         super().__init__()
         self.name = name
-        self.meters = AverageMeterSet()
+        self.meters = meter_set
 
     @abstractmethod
     def _train_step(self, batch):
         """Implement the train step for one batch"""
+        ...
 
     @abstractmethod
     def _val_step(self, batch):
         """Implement the val step for one batch"""
+        ...
 
     @abstractmethod
     def _train_epoch(self, epoch):
         """Implement the training method for one epoch"""
+        ...
 
     @abstractmethod
     def _val_epoch(self, epoch):
         """Implement the validation method for one epoch"""
+        ...
 
     @abstractmethod
     def train(self):
         """Implement the whole training loop"""
-
+        ...
 
 class FlexMatchTrainer(Trainer):
     """Trainer Class for FlexMatch Algorithm"""
@@ -215,7 +220,7 @@ class FlexMatchTrainer(Trainer):
         for batch_idx in range(self.train_length):
 
             # Zero the optimizer
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
 
             # Get batches
             batches = (next(train_l_loader), next(train_u_loader))
@@ -428,6 +433,7 @@ class SupervisedTrainer(Trainer):
     def __init__(
         self,
         name: str,
+        meter_set: MeterSet,
         conf: OmegaConf,
         model: torch.nn.Module,
         train_loader: torch.utils.data.DataLoader,
@@ -439,7 +445,7 @@ class SupervisedTrainer(Trainer):
         # tb_logger: torch.utils.tensorboard.writer.SummaryWriter = None,
         class_map: dict=None,
     ):
-        super().__init__(name=name) # Initialize the name and AverageMeterSet
+        super().__init__(name=name, meter_set=meter_set) # Initialize the name and AverageMeterSet
         self.trainer_id = "_".join([name, str(uuid.uuid4())])
         self.conf = conf
         self.model = model
@@ -454,12 +460,12 @@ class SupervisedTrainer(Trainer):
         # self.class_map = class_map
 
         # Set up metrics class
-        self.train_metrics = MetricLogger(
-            num_classes=self.conf.model.config.classes, device=self.conf.device
-        )
-        self.val_metrics = MetricLogger(
-            num_classes=self.conf.model.config.classes, device=self.conf.device
-        )
+        # self.train_metrics = MetricLogger(
+        #     num_classes=self.conf.model.config.classes, device=self.conf.device
+        # )
+        # self.val_metrics = MetricLogger(
+        #     num_classes=self.conf.model.config.classes, device=self.conf.device
+        # )
 
         checkpoint_path = Path(self.conf.directories.checkpoint_dir) / self.conf.model_run
         # self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.conf), monitor='train_loss')
@@ -474,8 +480,8 @@ class SupervisedTrainer(Trainer):
         """
         # Unpack batch and send to device
         img, targets = batch
-        inputs = img.to(self.conf.device)
-        targets = targets.long().to(self.conf.device)
+        inputs = img.to(self.conf.device, non_blocking=True)
+        targets = targets.long().to(self.conf.device, non_blocking=True)
 
         # Forward pass through model
         logits = self.model(inputs)
@@ -484,13 +490,18 @@ class SupervisedTrainer(Trainer):
         loss = self.criterion(logits, targets)
 
         # Update the training loss meter
-        self.meters.update("train_loss", loss.item())
+        update_dict = {
+            'train_loss': {'val': loss.item(), 'n': logits.size()[0]},
+            'train_loss_smooth': {'val': loss.item(), 'n': 1}
+        }
+        self.meters.update(update_dict)
+
 
         # Get the class predictions
-        preds = torch.argmax(logits, dim=1).to(self.conf.device)
+        # preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
         # Update the training metrics
-        self.train_metrics.update(preds=preds, targets=targets)
+        # self.train_metrics.update(preds=preds, targets=targets)
 
         return loss
 
@@ -499,7 +510,7 @@ class SupervisedTrainer(Trainer):
         # Put model in training mode and reset meters
         self.model.train()
         self.meters.reset()
-        self.train_metrics.reset()
+        # self.train_metrics.reset()
 
         # Set progress bar and unpack batches
         p_bar = tqdm(range(len(self.train_loader)), colour='yellow')
@@ -508,7 +519,7 @@ class SupervisedTrainer(Trainer):
         for batch_idx, batch in enumerate(self.train_loader):
 
             # Zero the optimizer
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
 
             # Train one batch and backpropagate the errors
             loss = self._train_step(batch)

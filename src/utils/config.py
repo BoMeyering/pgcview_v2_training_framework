@@ -4,13 +4,15 @@ Configuration File Validation script
 BoMeyering 2025
 """
 
+import torch
 import omegaconf
 import logging
 import datetime
 from dataclasses import dataclass, field
 from omegaconf import OmegaConf
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Union
+
 
 class ModelArchitecture(Enum):
     """
@@ -69,6 +71,7 @@ class Training:
 @dataclass
 class Loss:
     name: LossCriterion=LossCriterion.CELOSS
+    class_sample_count_path: str='metadata/class_sample_counts.json'
     samples: Optional[List[float]]=field(default_factory=list)
     weights: Optional[List[float]]=field(default_factory=list)
     use_weights: bool=False
@@ -108,9 +111,11 @@ class Optimizer:
     weight_decay: float=0.0001
     filter_bias_and_bn: bool=True
     nesterov: bool=True
+    momentum: float=0.9
     ema: bool=True
     ema_decay: float=0.9
     gamma: float=0.99
+
     original_weight_decay: float=0.0001 # Used internally if filter_bias_and_bn is True
 
 @dataclass
@@ -140,6 +145,9 @@ class TrainSupervisedConfig:
     training: Training=field(default_factory=Training)
     loss: Loss=field(default_factory=Loss)
     device: str='cpu'
+    rank: int=0
+    local_rank: int=0
+    world_size: int=1
     batch_size: BatchSize=field(default_factory=BatchSize)
     flexmatch: FlexMatch=field(default_factory=FlexMatch)
     model: Model=field(default_factory=Model)

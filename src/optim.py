@@ -4,12 +4,16 @@ Optimizer and EMA classes
 BoMeyering 2025
 """
 
+import logging
 import torch
 import inspect
 import argparse
 from omegaconf import OmegaConf
 from typing import List, Generator
 import segmentation_models_pytorch as smp
+from src.utils.loggers import rank_log
+
+logger = logging.getLogger()
 
 class OptimizerConfig:
     def __init__(self, conf, model_parameters):
@@ -23,11 +27,12 @@ class OptimizerConfig:
         try:
             OptimClass = getattr(torch.optim, self.optim_params['name'])
         except AttributeError:
-            print(f"The loss function {self.optim_params['name']} is not in torch.nn. Defaulting to torch.optim.SGD.")
+            rank_log(self.conf.local_rank, logger.warning, f"The loss function {self.optim_params['name']} is not in torch.nn. Defaulting to torch.optim.SGD.")
             OptimClass = torch.optim.SGD
             
         valid_params = inspect.signature(OptimClass).parameters
         filtered_params = {k: v for k, v in self.optim_params.items() if k in valid_params}
+
         optim_params = {'params': self.model_params}
         optim_params.update(filtered_params)
 
@@ -41,7 +46,7 @@ class OptimizerConfig:
             try:
                 SchedClass = getattr(torch.optim.lr_scheduler, self.args.scheduler.name)
             except AttributeError:
-                print(f"The scheduler {self.args.scheduler.name} is not in torch.optim.lr_scheduler. Defaulting to torch.optim..")
+                rank_log(self.conf.local_rank, logger.warning, f"The scheduler {self.args.scheduler.name} is not in torch.optim.lr_scheduler. Defaulting to torch.optim.")
                 SchedClass = torch.optim.lr_scheduler.LinearLR
 
         valid_params = inspect.signature(SchedClass).parameters
