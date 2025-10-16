@@ -41,7 +41,7 @@ device: cuda
 
 # Batch Sizes
 batch_size:
-  labeled: 2
+  labeled: 10
   unlabeled: 2
 
 # Flexmatch
@@ -52,7 +52,7 @@ flexmatch:
 
 # Model Architecture
 model:
-  architecture: UNET
+  architecture: DEEPLABV3PLUS
   config:
     encoder_name: efficientnet-b0
     encoder_depth: 5
