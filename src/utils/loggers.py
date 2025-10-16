@@ -44,7 +44,7 @@ def rank_log(local_rank: int, fn, *args, **kwargs):
         *args
             The positional arguments for the logger call
         **kwargs
-            The keyword argumes for the logger call
+            The keyword arguments for the logger call
     """
     if local_rank == 0:
         fn(*args, **kwargs)

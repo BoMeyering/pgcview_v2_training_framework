@@ -72,6 +72,7 @@ logger = logging.getLogger()
 
 # Set torch device - will set conf.device as 'TYPE:LOCAL_RANK' e.g. 'cuda:0', 'cpu:2' etc
 set_torch_device(conf)
+print(conf.device)
 
 # Set data normalization values
 set_normalization_values(conf)
@@ -108,7 +109,10 @@ def main(conf: omegaconf.OmegaConf=conf):
         find_unused_parameters=True
     )
     rank_log(conf.local_rank, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
-    rank_log(conf.local_rank, logger.info, f"Main process is on {torch.cuda.get_device_name(0)} - {conf.device}")
+    if 'cuda' in conf.device:
+        rank_log(conf.local_rank, logger.info, f"Main process is on {torch.cuda.get_device_name(0)} - {conf.device}")
+    else:
+        rank_log(conf.local_rank, logger.info, f"Main process is on {conf.device}")
     rank_log(conf.local_rank, logger.info, f"Total world size: {dist.get_world_size()}")
 
     # Augmentation Pipelines

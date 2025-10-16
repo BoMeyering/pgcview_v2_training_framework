@@ -20,7 +20,7 @@ import torch
 import torch.distributed as dist
 import numpy as np
 
-from typing import Union
+from typing import Union, Optional, Any, Tuple
 from torch.utils.tensorboard import SummaryWriter
 from src.flexmatch import get_pseudo_labels
 from src.parameters import EMA
@@ -42,22 +42,22 @@ class Trainer(ABC):
         self.meters = meter_set
 
     @abstractmethod
-    def _train_step(self, batch):
+    def _train_step(self, batch) -> Tuple[Any, Any]:
         """Implement the train step for one batch"""
         ...
 
     @abstractmethod
-    def _val_step(self, batch):
+    def _val_step(self, batch) -> Tuple[Any, Any]:
         """Implement the val step for one batch"""
         ...
 
     @abstractmethod
-    def _train_epoch(self, epoch):
+    def _train_epoch(self, epoch) -> Any:
         """Implement the training method for one epoch"""
         ...
 
     @abstractmethod
-    def _val_epoch(self, epoch):
+    def _val_epoch(self, epoch) -> Any:
         """Implement the validation method for one epoch"""
         ...
 
@@ -101,13 +101,6 @@ class FlexMatchTrainer(Trainer):
         self.tb_logger = tb_logger
         self.class_map = class_map
         self.transforms = get_strong_transforms(resize=args.model.resize)
-
-        # try:
-        #     self.rank = dist.get_rank()
-        # except ValueError:
-        #     self.rank = 0
-        # except RuntimeError:
-        #     self.rank = 0
 
         # setup metrics class
         self.train_metrics = MetricLogger(
@@ -442,8 +435,8 @@ class SupervisedTrainer(Trainer):
         val_loader: torch.utils.data.DataLoader,
         criterion: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler=None,
-        ema: EMA=None,
+        scheduler: torch.optim.lr_scheduler.LRScheduler,
+        ema: Optional[EMA]=None,
         # tb_logger: torch.utils.tensorboard.writer.SummaryWriter = None,
         class_map: dict=None,
     ):
@@ -472,7 +465,7 @@ class SupervisedTrainer(Trainer):
         checkpoint_path = Path(self.conf.directories.checkpoint_dir) / self.conf.model_run
         # self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.conf), monitor='train_loss')
 
-    def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]):
+    def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Train over one batch
         
         parameters:
@@ -507,10 +500,10 @@ class SupervisedTrainer(Trainer):
         # self.train_metrics.reset()
 
         # Set progress bar and unpack batches
-        p_bar = tqdm(range(len(self.train_loader)), colour='yellow', disable=is_main_process())
+        p_bar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), colour='yellow', disable=is_main_process())
 
         # Iterate through the batches
-        for batch_idx, batch in enumerate(self.train_loader):
+        for batch_idx, batch in p_bar:
 
             # Zero the optimizer
             self.optimizer.zero_grad(set_to_none=True)
@@ -543,7 +536,7 @@ class SupervisedTrainer(Trainer):
                     loss=self.meters['train_loss_smooth'].mean
                 )
             )
-            p_bar.update()
+            # p_bar.update()
 
             # Tensorboard batch writing
             # loss_dict = {"train_loss": loss}
@@ -567,9 +560,7 @@ class SupervisedTrainer(Trainer):
 
         # Compute epoch metrics and loss
         # avg_metrics, mc_metrics = self.train_metrics.compute()
-        mean_loss_dict = self.meters.means()
-
-        print(mean_loss_dict)
+        avg_loss = self.meters['train_loss'].mean
 
         # Set the epoch step
         epoch_step = epoch + 1
@@ -595,15 +586,16 @@ class SupervisedTrainer(Trainer):
         #     )
 
         # Logger Logging
-            # self.logger.info(f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
-            # self.logger.info(f"Epoch {epoch + 1} - Avg Metrics {avg_metrics}")
-            # self.logger.info(f"Epoch {epoch + 1} - Multiclass Metrics {mc_metrics}")
+        rank_log(self.conf.local_rank, self.logger.info, f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
+        # self.logger.info(f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
+        # self.logger.info(f"Epoch {epoch + 1} - Avg Metrics {avg_metrics}")
+        # self.logger.info(f"Epoch {epoch + 1} - Multiclass Metrics {mc_metrics}")
 
         # return avg_loss
         return True
 
     @torch.no_grad()
-    def _val_step(self, batch: Tuple):
+    def _val_step(self, batch: Tuple) -> Tuple[torch.Tensor, torch.Tensor]:
         """ Validate over one batch """
 
         # Unpack batch and send to device
@@ -621,12 +613,12 @@ class SupervisedTrainer(Trainer):
         self.meters.update("validation_loss", loss.item(), logits.size()[0])
 
         # Get the class predictions
-        preds = torch.argmax(logits, dim=1).to(self.conf.device)
+        # preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
         # Update the validation metrics
-        self.val_metrics.update(preds=preds, targets=targets)
+        # self.val_metrics.update(preds=preds, targets=targets)
 
-        return loss
+        return loss, logits
 
     @torch.no_grad()
     def _val_epoch(self, epoch: int):
