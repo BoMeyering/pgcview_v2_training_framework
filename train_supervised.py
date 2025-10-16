@@ -9,6 +9,7 @@ import os
 import logging
 import argparse
 import omegaconf
+import torch.distributed as dist
 from argparse import ArgumentParser
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, DistributedSampler
@@ -16,6 +17,7 @@ from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn import CrossEntropyLoss
 from torch.nn.parallel import DistributedDataParallel as DDP
+
 
 # Local imports
 from src.models import create_smp_model
@@ -29,7 +31,7 @@ from src.transforms import get_train_transforms, get_val_transforms, get_strong_
 from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
 from src.utils.loggers import setup_loggers, rank_log
-from src.distributed import set_env_ranks, setup_ddp
+from src.distributed import set_env_ranks, setup_ddp, shutdown_ddp, is_main_process
 
 
 
@@ -105,8 +107,9 @@ def main(conf: omegaconf.OmegaConf=conf):
         output_device=conf.local_rank if 'cuda' in conf.device else None, 
         find_unused_parameters=True
     )
-    rank_log(conf.local_rank, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name} and placed on device {conf.device}")
-    rank_log(conf.local_rank, logger.info, f"Other processes have the model placed on device 'device.type:local_rank'")
+    rank_log(conf.local_rank, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
+    rank_log(conf.local_rank, logger.info, f"Main process is on {torch.cuda.get_device_name(0)} - {conf.device}")
+    rank_log(conf.local_rank, logger.info, f"Total world size: {dist.get_world_size()}")
 
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
@@ -203,11 +206,11 @@ def main(conf: omegaconf.OmegaConf=conf):
         optimizer=optimizer,
         scheduler=scheduler,
         ema=ema)
-    
+
     # Start training
     supervised_trainer.train()
-    
 
+    shutdown_ddp()
 
 if __name__ == '__main__':
     main()

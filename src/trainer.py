@@ -27,6 +27,8 @@ from src.parameters import EMA
 # from src.callbacks import ModelCheckpoint
 from src.metrics import MetricLogger, MeterSet, RunningAvgMeter, ValueMeter
 from src.transforms import get_strong_transforms
+from src.distributed import is_main_process
+from src.utils.loggers import rank_log
 
 
 
@@ -489,21 +491,13 @@ class SupervisedTrainer(Trainer):
         # Compute the training loss
         loss = self.criterion(logits, targets)
 
-        # Update the training loss meter
-        update_dict = {
-            'train_loss': {'val': loss.item(), 'n': logits.size()[0]},
-            'train_loss_smooth': {'val': loss.item(), 'n': 1}
-        }
-        self.meters.update(update_dict)
-
-
         # Get the class predictions
         # preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
         # Update the training metrics
         # self.train_metrics.update(preds=preds, targets=targets)
 
-        return loss
+        return loss, logits
 
     def _train_epoch(self, epoch: int):
         """ Traing over one epoch """
@@ -513,7 +507,7 @@ class SupervisedTrainer(Trainer):
         # self.train_metrics.reset()
 
         # Set progress bar and unpack batches
-        p_bar = tqdm(range(len(self.train_loader)), colour='yellow')
+        p_bar = tqdm(range(len(self.train_loader)), colour='yellow', disable=is_main_process())
 
         # Iterate through the batches
         for batch_idx, batch in enumerate(self.train_loader):
@@ -522,8 +516,15 @@ class SupervisedTrainer(Trainer):
             self.optimizer.zero_grad(set_to_none=True)
 
             # Train one batch and backpropagate the errors
-            loss = self._train_step(batch)
+            loss, logits = self._train_step(batch)
             loss.backward()
+
+            # Update the training loss meter after loss.backward() so all loss has been all-reduced
+            update_dict = {
+                'train_loss': {'val': loss.item(), 'n': logits.size()[0]},
+                'train_loss_smooth': {'val': loss.item(), 'n': 1}
+            }
+            self.meters.update(update_dict)
 
             # Step optimizer and update parameters for EMA
             self.optimizer.step()
@@ -539,7 +540,7 @@ class SupervisedTrainer(Trainer):
                     batch=batch_idx + 1,
                     iter=len(self.train_loader),
                     lr=self.scheduler.get_last_lr()[0],
-                    loss=loss.item(),
+                    loss=self.meters['train_loss_smooth'].mean
                 )
             )
             p_bar.update()
@@ -557,13 +558,18 @@ class SupervisedTrainer(Trainer):
             #     print(avg_metrics)
             #     print(mc_metrics)
 
+        # Distributed barrier
+        dist.barrier()
+
         # Step LR scheduler
         if self.scheduler:
             self.scheduler.step()
 
         # Compute epoch metrics and loss
         # avg_metrics, mc_metrics = self.train_metrics.compute()
-        # avg_loss = self.meters["train_loss"].avg
+        mean_loss_dict = self.meters.means()
+
+        print(mean_loss_dict)
 
         # Set the epoch step
         epoch_step = epoch + 1
@@ -588,10 +594,10 @@ class SupervisedTrainer(Trainer):
         #         class_map=self.class_map,
         #     )
 
-        #     # Logger Logging
-        #     self.logger.info(f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
-        #     self.logger.info(f"Epoch {epoch + 1} - Avg Metrics {avg_metrics}")
-        #     self.logger.info(f"Epoch {epoch + 1} - Multiclass Metrics {mc_metrics}")
+        # Logger Logging
+            # self.logger.info(f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
+            # self.logger.info(f"Epoch {epoch + 1} - Avg Metrics {avg_metrics}")
+            # self.logger.info(f"Epoch {epoch + 1} - Multiclass Metrics {mc_metrics}")
 
         # return avg_loss
         return True
@@ -701,16 +707,19 @@ class SupervisedTrainer(Trainer):
 
     def train(self):
         """ Train the model """
-        # if self.rank == 0:
-        #     self.logger.info(
-        #         f"Training {self.trainer_id} for {self.conf.model.epochs} epochs."
-        #     )
+        rank_log(dist.get_rank, self.logger.info, f"Training {self.trainer_id} for {self.conf.training.epochs} epochs.")
+
         for epoch in range(self.conf.training.epochs):
             # Train and validate one epoch
-            # self.logger.info(f"TRAINING EPOCH {epoch + 1}")
+            rank_log(dist.get_rank(), self.logger.info, f"TRAINING EPOCH {epoch + 1}")
             train_loss = self._train_epoch(epoch)
-            # self.logger.info(f"VALIDATING EPOCH {epoch + 1}")
-            val_loss = self._val_epoch(epoch)
+
+            dist.barrier()
+
+            rank_log(dist.get_rank(), self.logger.info, f"VALIDATING EPOCH {epoch + 1}")
+            # val_loss = self._val_epoch(epoch)
+
+            dist.barrier()
 
             # logs = {
             #     "epoch": epoch,
