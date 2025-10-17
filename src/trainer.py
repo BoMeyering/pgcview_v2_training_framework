@@ -23,7 +23,7 @@ import numpy as np
 from typing import Union, Optional, Any, Tuple
 from torch.utils.tensorboard import SummaryWriter
 from src.flexmatch import get_pseudo_labels
-from src.parameters import EMA
+from src.parameters import EMA, apply_ema
 # from src.callbacks import ModelCheckpoint
 from src.metrics import MetricLogger, MeterSet, RunningAvgMeter, ValueMeter
 from src.transforms import get_strong_transforms
@@ -609,9 +609,6 @@ class SupervisedTrainer(Trainer):
         # Compute validation loss
         loss = self.criterion(logits, targets)
 
-        # Update the validation loss meter
-        self.meters.update("validation_loss", loss.item(), logits.size()[0])
-
         # Get the class predictions
         # preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
@@ -627,31 +624,40 @@ class SupervisedTrainer(Trainer):
         self.model.eval()
         self.meters.reset()
 
-        # Set progress bar and unpack batches
-        p_bar = tqdm(range(len(self.val_loader)), colour='blue')
+        with apply_ema(self.ema):
+            # Set progress bar and unpack batches
+            p_bar = tqdm(range(len(self.val_loader)), colour='blue')
 
-        # Iterate through the batches
-        for batch_idx, batch in enumerate(self.val_loader):
+            # Iterate through the batches
+            with torch.inference_mode():  
+                for batch_idx, batch in enumerate(self.val_loader):
 
-            # Validate one batch
-            loss = self._val_step(batch)
+                    # Validate one batch
+                    loss, logits = self._val_step(batch)
 
-            # Update the progress bar
-            p_bar.set_description(
-                "Val Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.6f}. Loss: {loss:.6f}".format(
-                    epoch=epoch + 1,
-                    epochs=self.conf.training.epochs,
-                    batch=batch_idx + 1,
-                    iter=len(self.val_loader),
-                    lr=self.scheduler.get_last_lr()[0],
-                    loss=loss.item(),
-                )
-            )
-            p_bar.update()
+                    # Update the validation loss meter
+                    update_dict = {
+                        'val_loss': {'val': loss.item(), 'n': logits.size()[0]},
+                        'val_loss_smooth': {'val': loss.item(), 'n': 1}
+                    }
+                    self.meters.update(update_dict)
+
+                    # Update the progress bar
+                    p_bar.set_description(
+                        "Val Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.6f}. Loss: {loss:.6f}".format(
+                            epoch=epoch + 1,
+                            epochs=self.conf.training.epochs,
+                            batch=batch_idx + 1,
+                            iter=len(self.val_loader),
+                            lr=self.scheduler.get_last_lr()[0],
+                            loss=loss.item(),
+                        )
+                    )
+                    p_bar.update()
 
         # Compute epoch metrics
-        avg_metrics, mc_metrics = self.val_metrics.compute()
-        avg_loss = self.meters["validation_loss"].avg
+        # avg_metrics, mc_metrics = self.val_metrics.compute()
+        avg_loss = self.meters["val_loss"].mean
 
         # Epoch step
         epoch_step = epoch + 1
@@ -697,6 +703,8 @@ class SupervisedTrainer(Trainer):
 
         #     self.checkpoint(epoch=epoch, logs=logs)
 
+        return avg_loss
+
     def train(self):
         """ Train the model """
         rank_log(dist.get_rank, self.logger.info, f"Training {self.trainer_id} for {self.conf.training.epochs} epochs.")
@@ -709,7 +717,7 @@ class SupervisedTrainer(Trainer):
             dist.barrier()
 
             rank_log(dist.get_rank(), self.logger.info, f"VALIDATING EPOCH {epoch + 1}")
-            # val_loss = self._val_epoch(epoch)
+            val_loss = self._val_epoch(epoch)
 
             dist.barrier()
 

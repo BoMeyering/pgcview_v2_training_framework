@@ -147,7 +147,7 @@ def main(conf: omegaconf.OmegaConf=conf):
         dataset=val_ds, 
         rank=conf.local_rank, 
         shuffle=False, 
-        drop_last=False
+        drop_last=True
     )
     test_sampler = DistributedSampler(
         dataset=test_ds, 
@@ -160,14 +160,18 @@ def main(conf: omegaconf.OmegaConf=conf):
     train_loader = DataLoader(
         dataset=train_ds, 
         batch_size=conf.batch_size.labeled, 
+        # batch_size=6,
         shuffle=False,
-        sampler=train_sampler
+        sampler=train_sampler,
+        drop_last=True
     )
     val_loader = DataLoader(
         dataset=val_ds, 
         batch_size=conf.batch_size.labeled,
+        # batch_size=6,
         shuffle=False,
-        sampler=val_sampler
+        sampler=val_sampler,
+        drop_last=True
     )
     test_loader = DataLoader(
         dataset=test_ds, 
