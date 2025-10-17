@@ -252,10 +252,10 @@ class EMA:
         self.model = model
         self.decay = decay
         self.shadow_params = {}
-        self.original_params = {}
+        self._orig_params_cpu = {}
         self.update_params()
         self.verbose = verbose
-
+    @torch.no_grad()
     def update_params(self):
         """
         Assigns the current parameters to the shadow params if they don't exist.
@@ -263,22 +263,29 @@ class EMA:
         """
 
         for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                if name not in self.shadow_params:
-                    self.shadow_params[name] = param.data.clone()
-                else: # Update shadow params and apply decay
-                    self.shadow_params[name] = self.decay * self.shadow_params[name] + (1 - self.decay) * param.data
-    
+            if not param.requires_grad:
+                continue
+            if name not in self.shadow_params:
+                self.shadow_params[name] = param.detach().to('cpu').clone()
+            else:
+                shadow_param = self.shadow_params[name]
+                shadow_param.mul_(self.decay).add_(param.detach().to('cpu'), alpha=1-self.decay)
+                self.shadow_params[name] = self.decay * self.shadow_params[name] + (1 - self.decay) * param.detach().to('cpu')
+                    
+    @torch.no_grad()
     def assign_params(self):
         """
         Assign shadow parameters to the model's parameters
         """
+        self._orig_params_cpu.clear()
         for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                # Update the original parameters in the original parameters dictionary
-                self.original_params[name] = param.data.clone()
-                # Copy the data from the shadow params to the model param
-                param.data.copy_(self.shadow_params[name].data)
+            if not param.requires_grad:
+                continue
+            # Stash original param on cpu
+            self._orig_params_cpu[name] = param.detach().to('cpu').clone()
+
+            # Copy EMA param to live param
+            param.copy_(self.shadow_params[name].to(param.device, non_blocking=True))
 
     def update_and_assign_params(self):
         """
@@ -286,19 +293,20 @@ class EMA:
         """
         self.update_params()
         self.assign_params()
-        # if self.verbose:
-        #     rank_log(self.conf.local)
-        #     logger.info("Model 'live' parameters stashed and model updated with shadow params")
 
+    @torch.no_grad()
     def restore_params(self):
         """
         Restores the original model parameters to the model
         """
+        # Move original params back to live model params
         for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                param.data.copy_(self.original_params[name].data)
-        # if self.verbose:
-        #     logger.info("Model 'live' parameters restored from stashed params")
+            if not param.requires_grad:
+                continue
+            param.copy_(self._orig_params_cpu[name].to(param.device, non_blocking=True))
+        
+        # Clear out the cpu params dict
+        self._orig_params_cpu.clear()
 
 @contextmanager
 def apply_ema(ema):

@@ -41,7 +41,7 @@ device: cuda
 
 # Batch Sizes
 batch_size:
-  labeled: 10
+  labeled: 8
   unlabeled: 2
 
 # Flexmatch
