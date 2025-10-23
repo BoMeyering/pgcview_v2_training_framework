@@ -17,7 +17,7 @@ from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn import CrossEntropyLoss
 from torch.nn.parallel import DistributedDataParallel as DDP
-
+import torch.distributed as dist
 
 # Local imports
 from src.models import create_smp_model
@@ -31,9 +31,7 @@ from src.transforms import get_train_transforms, get_val_transforms, get_strong_
 from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
 from src.utils.loggers import setup_loggers, rank_log
-from src.distributed import set_env_ranks, setup_ddp, shutdown_ddp, is_main_process
-
-
+from src.distributed import set_env_ranks, setup_ddp, shutdown_ddp
 
 # Create a parser for command line arguments
 parser = ArgumentParser(
@@ -48,7 +46,7 @@ args = parser.parse_args()
 if not os.path.exists(args.config):
     raise FileNotFoundError(f"The path to the configuration file {args.config} was not found.")
 
-# Set the backend engine for torchrun
+# Set the backend engine for torchrunis_main
 backend = args.backend
 setup_ddp(backend=backend)
 
@@ -60,7 +58,7 @@ yaml_conf = OmegaConf.load(args.config) # Load user supplied config file
 default_conf = OmegaConf.structured(TrainSupervisedConfig) # Load the default config structure - to fill in any missing args
 conf = OmegaConf.merge(default_conf, yaml_conf) # Any args in yaml_conf will override defaults
 
-# Set the ranks and world_size
+# Set the ranks, world size, and is_main
 set_env_ranks(conf)
 
 # Append timestamp to run name
@@ -72,14 +70,14 @@ logger = logging.getLogger()
 
 # Set torch device - will set conf.device as 'TYPE:LOCAL_RANK' e.g. 'cuda:0', 'cpu:2' etc
 set_torch_device(conf)
-print(conf.device)
 
 # Set data normalization values
 set_normalization_values(conf)
 
-# Read class counts from file
+# Read class sample counts from file and set conf.loss samples and inverse weights
 samples, inv_weights = read_class_counts(conf.loss.class_sample_count_path)
 conf.loss.samples, conf.loss.weights = samples, inv_weights
+rank_log(conf.is_main, logger.info, f"Set conf.loss.samples and conf.loss.weights from {conf.loss.class_sample_count_path}")
 
 #----------------------------------------#
 # Main entry point
@@ -98,7 +96,7 @@ def main(conf: omegaconf.OmegaConf=conf):
     """
 
     # Log training
-    rank_log(conf.local_rank, logger.info, "Current Training Configuration\n"+OmegaConf.to_yaml(conf))
+    rank_log(conf.is_main, logger.info, "Current Training Configuration\n"+OmegaConf.to_yaml(conf))
 
     # Create and wrap model for DDP
     model = create_smp_model(conf=conf).to(conf.device)
@@ -108,12 +106,12 @@ def main(conf: omegaconf.OmegaConf=conf):
         output_device=conf.local_rank if 'cuda' in conf.device else None, 
         find_unused_parameters=True
     )
-    rank_log(conf.local_rank, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
+    rank_log(conf.is_main, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
     if 'cuda' in conf.device:
-        rank_log(conf.local_rank, logger.info, f"Main process is on {torch.cuda.get_device_name(0)} - {conf.device}")
+        rank_log(conf.is_main, logger.info, f"Main process is on {torch.cuda.get_device_name(0)} - {conf.device}")
     else:
-        rank_log(conf.local_rank, logger.info, f"Main process is on {conf.device}")
-    rank_log(conf.local_rank, logger.info, f"Total world size: {dist.get_world_size()}")
+        rank_log(conf.is_main, logger.info, f"Main process is on {conf.device}")
+    rank_log(conf.is_main, logger.info, f"Total world size: {dist.get_world_size()}")
 
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
@@ -186,12 +184,12 @@ def main(conf: omegaconf.OmegaConf=conf):
     
     # Criterion
     criterion = get_loss_criterion(conf)
-    rank_log(conf.local_rank, logger.info, f"Instantiated loss criterion {type(criterion)}")
+    rank_log(conf.is_main, logger.info, f"Instantiated loss criterion {type(criterion)}")
 
     # Initialize EMA if specified
     if conf.optimizer.ema:
         ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
-        rank_log(conf.local_rank, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
+        rank_log(conf.is_main, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
     else:
         ema = None
 

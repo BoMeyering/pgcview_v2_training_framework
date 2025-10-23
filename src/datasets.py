@@ -21,9 +21,6 @@ from glob import glob
 
 from src.transforms import get_train_transforms, get_weak_transforms, get_strong_transforms, get_tensor_transforms
 
-
-
-
 class StatDataset(Dataset):
     """
     Barebones dataset implemented to iterate through all images in a single directory for image stat collection

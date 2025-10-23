@@ -9,9 +9,12 @@ import omegaconf
 import inspect
 import logging
 import torch.nn as nn
+import torch.distributed as dist
 from contextlib import contextmanager
 from typing import List, Tuple, Optional, Any
 from src.utils.loggers import rank_log
+from src.distributed import is_main_process
+
 
 # Set up logger
 logger = logging.getLogger()
@@ -48,7 +51,8 @@ class OptimConfig:
             raise ValueError(f"Argument 'conf' should be of type 'omegaconf.dictconfig.DictConfig'.")
         self.conf = conf
         self.model = model
-        self.optim_params = conf.optimizer
+        self.optim_args = conf.optimizer
+        self.optim_params = conf.optimizer.optimizer_params
         self.scheduler_params = conf.scheduler
     
     def _add_weight_decay(
@@ -111,20 +115,20 @@ class OptimConfig:
         -------
             Tuple: A tuple containing the model parameters and the udpated weight decay value for the optimizer
         """
-        weight_decay = float(self.optim_params.weight_decay) if self.optim_params.weight_decay is not None else 0.0
-        filter_bias_and_bn = bool(self.optim_params.filter_bias_and_bn) if self.optim_params.filter_bias_and_bn is not None else False
+        weight_decay = float(self.optim_args.weight_decay) if self.optim_args.weight_decay is not None else 0.0
+        filter_bias_and_bn = bool(self.optim_args.filter_bias_and_bn) if self.optim_args.filter_bias_and_bn is not None else False
 
         if weight_decay > 0.0 and filter_bias_and_bn:
-            rank_log(self.conf.local_rank, logger.info, f"Applying weight decay={weight_decay} to model parameters. Bias and norm parameters will not be decayed.")
+            rank_log(self.conf.is_main, logger.info, f"Applying weight decay={weight_decay} to model parameters. Bias and norm parameters will not be decayed.")
 
             parameters = self._add_weight_decay(weight_decay)
             # Stash original weight decay and set to 0
-            setattr(self.optim_params, 'original_weight_decay', self.optim_params.weight_decay)
-            setattr(self.optim_params, 'weight_decay', 0.0) # Set weight decay to 0 since it's handled in parameter groups
+            setattr(self.optim_args, 'original_weight_decay', self.optim_args.weight_decay)
+            setattr(self.optim_args, 'weight_decay', 0.0) # Set weight decay to 0 since it's handled in parameter groups
 
             return parameters, 0.0
         else:
-            rank_log(self.conf.local_rank, logger.info, f"Applying weight decay={weight_decay} to all model parameters.")
+            rank_log(self.conf.is_main, logger.info, f"Applying weight decay={weight_decay} to all model parameters.")
             return list(self._iter_trainable_params()), weight_decay
 
 
@@ -137,16 +141,16 @@ class OptimConfig:
                 The instantiated optimizer.
         """
         # Get model parameters and updated weight decay
-        self.model_params, self.optim_params.weight_decay = self._get_params()
+        self.model_params, self.optim_args.weight_decay = self._get_params()
 
         try:
-            OptimClass = getattr(torch.optim, self.optim_params.name)
-            rank_log(self.conf.local_rank, logger.info, f"Using optimizer class {self.optim_params.name} from torch.optim")
+            OptimClass = getattr(torch.optim, self.optim_args.name)
+            rank_log(self.conf.is_main, logger.info, f"Using optimizer class {self.optim_args.name} from torch.optim")
         except AttributeError:
             valid_optim = [attr for attr in dir(torch.optim) if not attr.startswith("_") and inspect.isclass(getattr(torch.optim, attr))]
-            rank_log(self.conf.local_rank, logger.warning, f"The optimizer {self.optim_params.name} is not in ```torch.optim```")
-            rank_log(self.conf.local_rank, logger.warning, f"Must be one of {valid_optim}")
-            rank_log(self.conf.local_rank, logger.info, "Defaulting to torch.optim.SGD.")
+            rank_log(self.conf.is_main, logger.warning, f"The optimizer {self.optim_args.name} is not in ```torch.optim```")
+            rank_log(self.conf.is_main, logger.warning, f"Must be one of {valid_optim}")
+            rank_log(self.conf.is_main, logger.info, "Defaulting to torch.optim.SGD.")
             OptimClass = torch.optim.SGD
         
         # Grab the valid parameters for the optimizer class and filter
@@ -159,7 +163,7 @@ class OptimConfig:
 
         # Instantiate the optimizer
         optimizer = OptimClass(**optim_params)
-        rank_log(self.conf.local_rank, logger.info, f"Instantiated optimizer {self.optim_params.name}")
+        rank_log(self.conf.is_main, logger.info, f"Instantiated optimizer {self.optim_args.name}")
         self.optimizer = optimizer
 
         return optimizer
@@ -182,9 +186,9 @@ class OptimConfig:
                 and not attr.startswith("_")
                 and inspect.isclass(getattr(torch.optim.lr_scheduler, attr))
             ]
-            rank_log(self.conf.local_rank, logger.error, f"The LR scheduler {self.scheduler_params.name} is not in ```torch.optim.lr_scheduler```")
-            rank_log(self.conf.local_rank, logger.error, f"Must be one of {valid_sched}")
-            rank_log(self.conf.local_rank, logger.info, "Defaulting to torch.optim.lr_scheduler.LinearLR.")
+            rank_log(self.conf.is_main, logger.error, f"The LR scheduler {self.scheduler_params.name} is not in ```torch.optim.lr_scheduler```")
+            rank_log(self.conf.is_main, logger.error, f"Must be one of {valid_sched}")
+            rank_log(self.conf.is_main, logger.info, "Defaulting to torch.optim.lr_scheduler.LinearLR.")
 
             SchedClass = torch.optim.lr_scheduler.LinearLR
 

@@ -32,13 +32,13 @@ def setup_loggers(conf):
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(conf.logging_level)
 
-def rank_log(local_rank: int, fn, *args, **kwargs):
+def rank_log(main_process: bool, fn, *args, **kwargs):
     """Log a message only on rank 0 process
     
     Parameters:
     -----------
-        local_rank : int
-            The local rank of the process.
+        main_process : bool
+            Is this the main process
         fn : logging.logger method
             The logging.logger call function
         *args
@@ -46,5 +46,5 @@ def rank_log(local_rank: int, fn, *args, **kwargs):
         **kwargs
             The keyword arguments for the logger call
     """
-    if local_rank == 0:
+    if main_process:
         fn(*args, **kwargs)

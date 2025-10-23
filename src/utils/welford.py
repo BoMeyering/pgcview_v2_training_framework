@@ -4,7 +4,6 @@ Welford calculator for online calculation of mean and standard deviations of an 
 BoMeyering 2025
 """
 import torch
-import sys
 from typing import Tuple
 
 class WelfordCalculator:

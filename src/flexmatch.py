@@ -119,14 +119,3 @@ def mask_targets(targets: torch.Tensor, mask: torch.Tensor, ignore_index: int=-1
     adj_targets = torch.where(mask, targets, torch.full_like(targets, ignore_index))
 
     return adj_targets
-
-
-
-if __name__ == '__main__':
-
-   for i in range(1, 20):
-       X = torch.randn(5, i, 100, 100)
-
-       beta_t = class_beta(logits=X, tau=0.3)
-
-       print(beta_t)

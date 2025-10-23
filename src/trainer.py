@@ -585,7 +585,7 @@ class SupervisedTrainer(Trainer):
         #     )
 
         # Logger Logging
-        rank_log(self.conf.local_rank, self.logger.info, f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
+        rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
         # self.logger.info(f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
         # self.logger.info(f"Epoch {epoch + 1} - Avg Metrics {avg_metrics}")
         # self.logger.info(f"Epoch {epoch + 1} - Multiclass Metrics {mc_metrics}")
@@ -625,7 +625,7 @@ class SupervisedTrainer(Trainer):
 
         with apply_ema(self.ema):
             # Set progress bar and unpack batches
-            p_bar = tqdm(range(len(self.val_loader)), colour='blue')
+            p_bar = tqdm(range(len(self.val_loader)), colour='blue', disable=is_main_process())
 
             # Iterate through the batches
             with torch.inference_mode():  
@@ -700,23 +700,23 @@ class SupervisedTrainer(Trainer):
 
             
         # Logger Logging
-        rank_log(self.conf.local_rank, self.logger.info, f"Epoch {epoch + 1} - Validation Loss: {avg_loss:.6f}")
+        rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch + 1} - Validation Loss: {avg_loss:.6f}")
         #     self.checkpoint(epoch=epoch, logs=logs)
 
         return avg_loss
 
     def train(self):
         """ Train the model """
-        rank_log(dist.get_rank, self.logger.info, f"Training {self.trainer_id} for {self.conf.training.epochs} epochs.")
+        rank_log(self.conf.is_main, self.logger.info, f"Training {self.trainer_id} for {self.conf.training.epochs} epochs.")
 
         for epoch in range(self.conf.training.epochs):
             # Train and validate one epoch
-            rank_log(dist.get_rank(), self.logger.info, f"TRAINING EPOCH {epoch + 1}")
+            rank_log(self.conf.is_main, self.logger.info, f"TRAINING EPOCH {epoch + 1}")
             train_loss = self._train_epoch(epoch)
 
             dist.barrier()
 
-            rank_log(dist.get_rank(), self.logger.info, f"VALIDATING EPOCH {epoch + 1}")
+            rank_log(self.conf.is_main, self.logger.info, f"VALIDATING EPOCH {epoch + 1}")
             val_loss = self._val_epoch(epoch)
 
             dist.barrier()

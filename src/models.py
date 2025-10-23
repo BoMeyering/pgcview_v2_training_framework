@@ -41,26 +41,3 @@ def create_smp_model(conf: omegaconf.dictconfig.DictConfig) -> torch.nn.Module:
         return model
     except AttributeError as e:
         raise ValueError(f"Model architecture {conf.model.architecture} is not a valid SMP architecture.\nSelect one from 'smp._MODEL_ARCHITECTURES'")
-
-
-
-
-if __name__ == '__main__':
-    
-    conf = OmegaConf.create(
-        {
-            "model": {
-                "architecture": "DeepLabV3Plus",
-                "config": {
-                    "encoder_name": "resnet18",
-                    "encoder_depth": 5,
-                    "encoder_weights": None,
-                    "in_channels": 3,
-                    "classes": 4
-                }
-            }
-        }
-    )
-    model = create_smp_model(conf)
-
-    print(type(model))
