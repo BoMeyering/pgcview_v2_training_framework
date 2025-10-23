@@ -186,6 +186,7 @@ def main(conf: omegaconf.OmegaConf=conf):
     
     # Criterion
     criterion = get_loss_criterion(conf)
+    rank_log(conf.local_rank, logger.info, f"Instantiated loss criterion {type(criterion)}")
 
     # Initialize EMA if specified
     if conf.optimizer.ema:
