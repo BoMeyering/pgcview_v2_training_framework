@@ -106,6 +106,8 @@ def get_loss_criterion(conf: OmegaConf) -> torch.nn.Module:
 
     # Instnatiate the criterion
     criterion = LossClass(**filtered_params)
+
+    rank_log(conf.local_rank, logger.info, f"Instantiated loss criterion {LossClass} with parameters {filtered_params}")
     
     return criterion
 

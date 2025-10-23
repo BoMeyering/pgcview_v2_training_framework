@@ -26,15 +26,22 @@ training:
   # beta2:
   nesterov: True
 
+optimizer:
+  name: AdamW
+  lr: 0.003
+  ema: True
+  filter_bias_and_bn: True
+
+
 # Criterion / Loss Function
 loss:
-  name: CELOSS
+  name: RECALLLOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
-  samples: 
+  samples: [6351473468, 4306878840, 9355991809, 1929005577, 1123526783, 2928697001, 85185280, 137097491, 476808, 13501062, 69851888, 5929323]
   weights: 
   use_weights: false
   reduction: mean
-  loss_type: CELOSS
+  loss_type: FOCALLOSS
 
 # Computation Device
 device: cuda

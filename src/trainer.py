@@ -5,7 +5,8 @@ BoMeyering 2025
 """
 
 import torch
-
+import os
+import cv2
 from glob import glob
 import uuid
 import logging
@@ -29,9 +30,6 @@ from src.metrics import MetricLogger, MeterSet, RunningAvgMeter, ValueMeter
 from src.transforms import get_strong_transforms
 from src.distributed import is_main_process
 from src.utils.loggers import rank_log
-
-
-
 
 class Trainer(ABC):
     """Abstract Trainer Class"""
@@ -451,6 +449,7 @@ class SupervisedTrainer(Trainer):
         self.scheduler = scheduler
         self.ema = ema
         self.logger = logging.getLogger()
+        self.sanity_check = True
         # self.tb_logger = tb_logger
         # self.class_map = class_map
 
@@ -600,8 +599,8 @@ class SupervisedTrainer(Trainer):
 
         # Unpack batch and send to device
         img, targets = batch
-        inputs = img.to(self.conf.device)
-        targets = targets.long().to(self.conf.device)
+        inputs = img.to(self.conf.device, non_blocking=True)
+        targets = targets.long().to(self.conf.device, non_blocking=True)
 
         # Forward pass through model
         logits = self.model(inputs)
@@ -700,7 +699,8 @@ class SupervisedTrainer(Trainer):
         #     }
 
             
-
+        # Logger Logging
+        rank_log(self.conf.local_rank, self.logger.info, f"Epoch {epoch + 1} - Validation Loss: {avg_loss:.6f}")
         #     self.checkpoint(epoch=epoch, logs=logs)
 
         return avg_loss
@@ -718,6 +718,39 @@ class SupervisedTrainer(Trainer):
 
             rank_log(dist.get_rank(), self.logger.info, f"VALIDATING EPOCH {epoch + 1}")
             val_loss = self._val_epoch(epoch)
+
+            dist.barrier()
+
+            if self.sanity_check:
+                if self.conf.local_rank == 0:
+                    out_dir = Path('outputs') / self.conf.model_run / str(epoch)
+                    os.makedirs(out_dir)
+                    
+                    with apply_ema(self.ema):
+                        # Set progress bar and unpack batches
+                        p_bar = tqdm(range(len(self.val_loader)), colour='blue')
+
+                        # Iterate through the batches
+                        with torch.inference_mode():  
+                            for batch_idx, batch in enumerate(self.val_loader):
+                                # Unpack batch and send to device
+                                img, targets = batch
+                                inputs = img.to(self.conf.device, non_blocking=True)
+                                targets = targets.long().to(self.conf.device, non_blocking=True)
+
+                                # Forward pass through model
+                                logits = self.model(inputs)
+
+                                maps = torch.argmax(logits, dim=1)
+
+                                for i, img in enumerate(maps):
+                                    img = img.detach().cpu().numpy().astype(np.uint8)
+                                    img *= 20
+
+                                    cv2.imwrite(str(Path(out_dir) / f"{i}.png"), img)
+
+
+                                
 
             dist.barrier()
 

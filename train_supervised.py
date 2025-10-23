@@ -98,7 +98,7 @@ def main(conf: omegaconf.OmegaConf=conf):
     """
 
     # Log training
-    rank_log(conf.local_rank, logger.info, "Current Training Configurration\n"+OmegaConf.to_yaml(conf))
+    rank_log(conf.local_rank, logger.info, "Current Training Configuration\n"+OmegaConf.to_yaml(conf))
 
     # Create and wrap model for DDP
     model = create_smp_model(conf=conf).to(conf.device)
