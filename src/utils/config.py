@@ -11,7 +11,7 @@ import datetime
 from dataclasses import dataclass, field
 from omegaconf import OmegaConf
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 
 class ModelArchitecture(Enum):
@@ -61,12 +61,7 @@ class Directories:
 @dataclass
 class Training:
     epochs: int=30
-    optim_name: str='SGD'
-    lr: float=0.001
-    momentum: float=0.99
-    beta1: float=0.1
-    beta2: float=0.2
-    nesterov: bool=True
+    sanity_check: bool=True
 
 @dataclass
 class Loss:
@@ -77,6 +72,8 @@ class Loss:
     use_weights: bool=False
     reduction: str='mean'
     loss_type: str='CELOSS'
+    gamma: float=2.0
+    smooth: float=1.0
 
 @dataclass
 class BatchSize:
@@ -91,40 +88,52 @@ class FlexMatch:
 
 @dataclass
 class SMPModelConfig:
-    encoder_name: Optional[str]=None
+    encoder_name: Optional[str]='resnet18'
     encoder_depth: Optional[int]=None
     encoder_weights: Optional[str]='imagenet'
-    input_channels: Optional[int]=None
+    input_channels: Optional[int]=3
     classes: Optional[int]=None
 
 @dataclass
 class Model:
     architecture: ModelArchitecture=ModelArchitecture.UNET
     config: SMPModelConfig=field(default_factory=SMPModelConfig)
-    # weight_decay: float=0.9
-    filter_bias_and_bn: bool=True
+
+@dataclass
+class OptimizerParams:
+    lr: float=0.001 # Learning rate
+    momentum: float=0.9 # Momentum rate
+    nesterov: bool=True # Use Nesterov momentum update
+    dampening: float=0 # Dampening parameter for SGD
+    alpha: float=0.99 # Alpha parameter for RMSprop
+    gamma: float=0.99
+    etas: Tuple[float]=field(default_factory=lambda: (0.5, 1.2)) # etas for Rprop
+    betas: Tuple[float]=field(default_factory=lambda: (0.9, 0.999)) # betas for Adam
+    rho: float=0.9 # Rho parameter for Adadelta
+    amsgrad: bool=False
+    foreach: Optional[bool]=None # Foreach loop flag
+
 
 @dataclass
 class Optimizer:
     name: str='SGD'
-    lr: float=0.001
-    weight_decay: float=0.0001
+    weight_decay: float=0.0001 # Optimizer weight decay
+    original_weight_decay: Optional[float]=None # Used internally if filter_bias_and_bn is True
     filter_bias_and_bn: bool=True
-    nesterov: bool=True
-    momentum: float=0.9
     ema: bool=True
     ema_decay: float=0.9
-    gamma: float=0.99
-
-    original_weight_decay: float=0.0001 # Used internally if filter_bias_and_bn is True
+    optimizer_params: OptimizerParams=field(default_factory=OptimizerParams)
 
 @dataclass
 class Scheduler:
+    """ Currently implemented for ExponentialLR, LinearLR, CosineAnnealingLR, and CosineAnnealingWarmRestarts """
     name: str='ExponentialLR'
-    step_size: int=1
-    gamma: float=0.99
-    T_max: int=50
-    eta_min: float=0.0001
+    gamma: float=0.99 # Set for default ExponentialLR
+    step_size: float=0.00001
+    T_max: int=5 # T_max parameter for CosineAnnealingLR
+    eta_min: float=0.0 # Default eta_min for CosineAnnealingLR
+    T_0: Optional[int]=None # CosineAnnealingWarmRestarts
+    T_mult: int=1 # CosineAnnealingWarmRestarts
     last_epoch: int=-1
 
 @dataclass
@@ -136,25 +145,28 @@ class Norm:
 class Metadata:
     norm_path: str='metadata/dataset_norm.json'
     norm: Norm=field(default_factory=Norm)
+    target_mapping_path: str='metadata/target_mapping.json'
+    target_mapping: Optional[dict]=None
 
 @dataclass
 class TrainSupervisedConfig:
     model_run: str='model_run'
+    device: str='cpu'
+    rank: Optional[int]=None
+    local_rank: Optional[int]=None
+    world_size: Optional[int]=None
+    is_main: Optional[bool]=None
     images: Images=field(default_factory=Images)
+    metadata: Metadata=field(default_factory=Metadata)
+    logging_level: str='INFO'
     directories: Directories=field(default_factory=Directories)
     training: Training=field(default_factory=Training)
-    loss: Loss=field(default_factory=Loss)
-    device: str='cpu'
-    rank: int=0
-    local_rank: int=0
-    world_size: int=1
-    batch_size: BatchSize=field(default_factory=BatchSize)
-    flexmatch: FlexMatch=field(default_factory=FlexMatch)
     model: Model=field(default_factory=Model)
     optimizer: Optimizer=field(default_factory=Optimizer)
     scheduler: Scheduler=field(default_factory=Scheduler)
-    metadata: Metadata=field(default_factory=Metadata)
-    logging_level: str='INFO'
+    loss: Loss=field(default_factory=Loss)
+    batch_size: BatchSize=field(default_factory=BatchSize)
+    flexmatch: FlexMatch=field(default_factory=FlexMatch)
 
 @dataclass
 class TrainSemiSupervisedConfig(TrainSupervisedConfig):

@@ -1,13 +1,23 @@
 # Training configs
-model_run: model_run_name
+model_run: model_run
 
+# Computation Device
+device: cuda
+
+# Images
 images:
   input_channels: 3
   resize: [1024, 1024]
 
+# Metadata for normalization
+metadata:
+  norm_path: metadata/dataset_norm.json
+
+# Logging
+logging_level: DEBUG
+
 # Directories
 directories:
-  # train_labeled_dir: data/toy_dataset/train/labeleds
   train_labeled_dir: data/raw/labeled
   train_unlabeled_dir: data/toy_dataset/train/unlabeled
   val_dir: data/toy_dataset/val
@@ -16,35 +26,46 @@ directories:
   checkpoint_dir: model_checkpoints
   log_dir: logs/run_logs
 
-# Optimizer
+# Training
 training:
-  epochs: 10
-  # optim_name:
-  lr: 0.001
-  momentum: .9
-  # beta1:
-  # beta2:
-  nesterov: True
+  epochs: 30
+  sanity_check: True
 
+# Model Architecture
+model:
+  architecture: DEEPLABV3PLUS
+  config:
+    encoder_name: efficientnet-b0
+    encoder_depth: 5
+    encoder_weights: imagenet
+    input_channels: 3
+    classes: 12
+
+# Optimizer stuff
 optimizer:
   name: AdamW
-  lr: 0.003
-  ema: True
+  weight_decay: 0.0001
   filter_bias_and_bn: True
+  ema: True
+  ema_decay: 0.9
+  optimizer_params: 
+    lr: 0.003
+    momentum: 0.9
+    nesterov: True
+    gamma: 0.99
 
+# Scheduler stuff
+scheduler:
+  name: ExponentialLR
+  gamma: 0.99
 
 # Criterion / Loss Function
 loss:
   name: RECALLLOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
-  samples: [6351473468, 4306878840, 9355991809, 1929005577, 1123526783, 2928697001, 85185280, 137097491, 476808, 13501062, 69851888, 5929323]
-  weights: 
-  use_weights: false
   reduction: mean
+  use_weights: false
   loss_type: FOCALLOSS
-
-# Computation Device
-device: cuda
 
 # Batch Sizes
 batch_size:
@@ -56,22 +77,3 @@ flexmatch:
   tau: 0.95
   mapping: linear
   warmup: True
-
-# Model Architecture
-model:
-  architecture: DEEPLABV3PLUS
-  config:
-    encoder_name: efficientnet-b0
-    encoder_depth: 5
-    encoder_weights: imagenet
-    input_channels: 3
-    classes: 12
-  # weight_decay:
-  filter_bias_and_bn: True
-
-# Metadata for normalization
-metadata:
-  norm_path: metadata/dataset_norm.json
-
-# Logging
-logging_level: DEBUG

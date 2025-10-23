@@ -17,6 +17,7 @@ from typing import Union, Optional
 from omegaconf import OmegaConf
 from src.utils.config import LossCriterion
 from src.utils.loggers import rank_log
+from src.distributed import is_main_process
 
 logger = logging.getLogger()
 
@@ -65,7 +66,7 @@ def read_class_counts(filepath: Union[str, Path]=Path('metadata/class_sample_cou
             return samples, inv_weights
         
     except JSONDecodeError as e:
-        logger.error(f"Error decoding JSON file. Error: {e}")
+        rank_log(IS_MAIN, logger.error, f"Error decoding JSON file. Error: {e}")
 
         return None, None
 
