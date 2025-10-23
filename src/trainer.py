@@ -584,14 +584,11 @@ class SupervisedTrainer(Trainer):
         #         class_map=self.class_map,
         #     )
 
-        # Logger Logging
-        rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
         # self.logger.info(f"Epoch {epoch + 1} - Train Loss: {avg_loss:.6f}")
         # self.logger.info(f"Epoch {epoch + 1} - Avg Metrics {avg_metrics}")
         # self.logger.info(f"Epoch {epoch + 1} - Multiclass Metrics {mc_metrics}")
 
-        # return avg_loss
-        return True
+        return avg_loss
 
     @torch.no_grad()
     def _val_step(self, batch: Tuple) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -699,8 +696,7 @@ class SupervisedTrainer(Trainer):
         #     }
 
             
-        # Logger Logging
-        rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch + 1} - Validation Loss: {avg_loss:.6f}")
+
         #     self.checkpoint(epoch=epoch, logs=logs)
 
         return avg_loss
@@ -749,8 +745,8 @@ class SupervisedTrainer(Trainer):
 
                                     cv2.imwrite(str(Path(out_dir) / f"{i}.png"), img)
 
-
-                                
+            # Logger Logging
+            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch + 1} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}")
 
             dist.barrier()
 

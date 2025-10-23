@@ -1,8 +1,9 @@
+
 # Training configs
 model_run: model_run
 
 # Computation Device
-device: cuda
+device: cpu
 
 # Images
 images:
