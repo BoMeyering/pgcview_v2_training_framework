@@ -46,7 +46,7 @@ class TestDataloaderCreation(unittest.TestCase):
         )
 
         for batch_idx, batch in enumerate(l_dl):
-            images, targets = batch
+            images, targets, img_keys = batch
             self.assertIsInstance(images, Tensor)
             self.assertIsInstance(targets, Tensor)
 
@@ -68,7 +68,7 @@ class TestDataloaderCreation(unittest.TestCase):
             batch = next(iterloader)
             self.assertIsInstance(batch, list)
 
-            images, targets = batch
+            images, targets, img_keys = batch
             self.assertIsInstance(images, Tensor)
             self.assertIsInstance(targets, Tensor)
 

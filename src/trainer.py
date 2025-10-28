@@ -33,6 +33,7 @@ from src.metrics import MetricLogger, MeterSet, RunningAvgMeter, ValueMeter
 from src.transforms import get_strong_transforms
 from src.distributed import is_main_process
 from src.utils.loggers import rank_log
+from src.callbacks import CheckpointManager
 
 class Trainer(ABC):
     """Abstract Trainer Class"""
@@ -234,7 +235,7 @@ class FlexMatchTrainer(Trainer):
             # Update progress bar
             p_bar.set_description(
                 "Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.6f}. Comb. Loss: {loss:.6f}. Conf: {f:.6f}".format(
-                    epoch=epoch + 1,
+                    epoch=epoch,
                     epochs=self.args.model.epochs,
                     batch=batch_idx + 1,
                     iter=self.train_length,
@@ -275,9 +276,6 @@ class FlexMatchTrainer(Trainer):
         loss = self.meters["total_loss"].avg
         l_loss = self.meters["labeled_loss"].avg
         u_loss = self.meters["unlabeled_loss"].avg
-
-        # Set the epoch step
-        epoch_step = epoch + 1
 
         # Epoch Loss Logging
         loss_dict = {
@@ -439,7 +437,9 @@ class SupervisedTrainer(Trainer):
         criterion: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LRScheduler,
-        ema: Optional[EMA]=None
+        checkpoint_manager=Optional[CheckpointManager],
+        sanity_check: bool=True,
+        ema: Optional[EMA]=None,
     ):
         super().__init__(name=name, meter_set=meter_set, tb_writer=tb_writer) # Initialize the name and AverageMeterSet
         self.trainer_id = "_".join([name, str(uuid.uuid4())])
@@ -452,7 +452,8 @@ class SupervisedTrainer(Trainer):
         self.scheduler = scheduler
         self.ema = ema
         self.logger = logging.getLogger()
-        self.sanity_check = True
+        self.sanity_check = sanity_check
+        self.checkpoint_manager = checkpoint_manager
 
         # Load in target mapping
         if self.conf.metadata.target_mapping_path:
@@ -473,9 +474,6 @@ class SupervisedTrainer(Trainer):
         #     num_classes=self.conf.model.config.classes, device=self.conf.device
         # )
 
-        self.checkpoint_path = Path(self.conf.directories.checkpoint_dir) / self.conf.model_run
-        # self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.conf), monitor='train_loss')
-
     def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Train over one batch
         
@@ -485,7 +483,7 @@ class SupervisedTrainer(Trainer):
                 A batch of images and targets from the training DataLoader.
         """
         # Unpack batch and send to device
-        img, targets = batch
+        img, targets, _ = batch
         inputs = img.to(self.conf.device, non_blocking=True)
         targets = targets.long().to(self.conf.device, non_blocking=True)
 
@@ -539,7 +537,7 @@ class SupervisedTrainer(Trainer):
             # Update progress bar
             p_bar.set_description(
                 "Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.6f}. Loss: {loss:.6f}".format(
-                    epoch=epoch + 1,
+                    epoch=epoch,
                     epochs=self.conf.training.epochs,
                     batch=batch_idx + 1,
                     iter=len(self.train_loader),
@@ -549,16 +547,11 @@ class SupervisedTrainer(Trainer):
             )
 
             # Tensorboard batch writing
-            batch_step = (epoch * len(self.train_loader)) + batch_idx
+            batch_step = ((epoch-1) * len(self.train_loader)) + batch_idx
             if dist.get_rank() == 0:
                 self.tb_writer.add_scalar(
                     tag="batch_loss/train", scalar_value=loss.item(), global_step=batch_step
                 )
-
-            # if batch_idx % 200 == 0:
-            #     avg_metrics, mc_metrics = self.train_metrics.compute()
-            #     print(avg_metrics)
-            #     print(mc_metrics)
 
         # Distributed barrier
         dist.barrier()
@@ -576,9 +569,6 @@ class SupervisedTrainer(Trainer):
             self.tb_writer.add_scalar(
                 tag="epoch_loss/train", scalar_value=avg_loss, global_step=epoch+1
             )
-
-        # Set the epoch step
-        epoch_step = epoch + 1
 
         # Epoch Loss Logging if not in distributed training
         # loss_dict = tag_scalar_dict = {"train_loss": avg_loss}
@@ -607,7 +597,7 @@ class SupervisedTrainer(Trainer):
         """ Validate over one batch """
 
         # Unpack batch and send to device
-        img, targets = batch
+        img, targets, img_keys = batch
         inputs = img.to(self.conf.device, non_blocking=True)
         targets = targets.long().to(self.conf.device, non_blocking=True)
 
@@ -653,7 +643,7 @@ class SupervisedTrainer(Trainer):
                     # Update the progress bar
                     p_bar.set_description(
                         "Val Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.6f}. Loss: {loss:.6f}".format(
-                            epoch=epoch + 1,
+                            epoch=epoch,
                             epochs=self.conf.training.epochs,
                             batch=batch_idx + 1,
                             iter=len(self.val_loader),
@@ -663,7 +653,7 @@ class SupervisedTrainer(Trainer):
                     )
 
                     # Tensorboard batch writing
-                    batch_step = (epoch * len(self.train_loader)) + batch_idx
+                    batch_step = ((epoch-1) * len(self.train_loader)) + batch_idx
                     if dist.get_rank() == 0:
                         self.tb_writer.add_scalar(
                             tag="batch_loss/val", scalar_value=loss.item(), global_step=batch_step
@@ -672,9 +662,6 @@ class SupervisedTrainer(Trainer):
         # Compute epoch metrics
         # avg_metrics, mc_metrics = self.val_metrics.compute()
         avg_loss = self.meters["val_loss"].mean
-
-        # Epoch step
-        epoch_step = epoch + 1
 
         # Epoch Loss Logging
         loss_dict = {"validation_loss": avg_loss}
@@ -725,77 +712,80 @@ class SupervisedTrainer(Trainer):
 
         return avg_loss
 
+    def _sanity_check(self, epoch):
+        """ Run a sanity check for the model """
+        rank_log(self.conf.is_main, self.logger.info, f"SANITY CHECK {epoch}")
+        out_dir = Path(self.conf.directories.output_dir) / self.conf.model_run / "_".join(["epoch", str(epoch)])
+        if self.conf.local_rank == 0:
+            os.makedirs(out_dir)
+            
+        with apply_ema(self.ema):
+            # Set progress bar and unpack batches
+            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='green', disable=is_main_process())
+
+            # Iterate through the batches
+            with torch.inference_mode():  
+                for batch_idx, batch in p_bar:
+                    # Unpack batch and send to device
+                    img, targets, img_keys = batch
+                    inputs = img.to(self.conf.device, non_blocking=True)
+                    targets = targets.long().to(self.conf.device, non_blocking=True)
+
+                    # Forward pass through model
+                    logits = self.model(inputs)
+
+                    maps = torch.argmax(logits, dim=1)
+
+                    # for i, img in enumerate(maps):
+                    for img_key, img in zip(img_keys, maps):
+                        img = img.detach().cpu().numpy().astype(np.uint8)
+                        if getattr(self, 'map_arr', None) is not None:
+                            img = self.map_arr[img]
+                        else:
+                            img *= 20 # Scale outputs to make class distinction clear
+
+                        cv2.imwrite(str(Path(out_dir) / f"{Path(img_key).stem}_outmap.png"), img)
+                    
+                    # Update the progress bar
+                    p_bar.set_description(
+                        "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
+                            epoch=epoch,
+                            epochs=self.conf.training.epochs,
+                            batch=batch_idx + 1,
+                            iter=len(self.val_loader)
+                        )
+                    )
+
     def train(self):
         """ Train the model """
         rank_log(self.conf.is_main, self.logger.info, f"Training {self.trainer_id} for {self.conf.training.epochs} epochs.")
 
-        for epoch in range(self.conf.training.epochs):
+        for epoch in range(1, self.conf.training.epochs + 1):
             # Train and validate one epoch
-            rank_log(self.conf.is_main, self.logger.info, f"TRAINING EPOCH {epoch + 1}")
+            rank_log(self.conf.is_main, self.logger.info, f"TRAINING EPOCH {epoch}")
             train_loss = self._train_epoch(epoch)
             time.sleep(1)
             dist.barrier()
 
-            rank_log(self.conf.is_main, self.logger.info, f"VALIDATING EPOCH {epoch + 1}")
+            rank_log(self.conf.is_main, self.logger.info, f"VALIDATING EPOCH {epoch}")
             val_loss = self._val_epoch(epoch)
             time.sleep(1)
             dist.barrier()
 
             if self.sanity_check:
-                rank_log(self.conf.is_main, self.logger.info, f"SANITY CHECK {epoch + 1}")
-                out_dir = Path('outputs') / self.conf.model_run / "_".join(["epoch", str(epoch)])
-                if self.conf.local_rank == 0:
-                    os.makedirs(out_dir)
-                    
-                with apply_ema(self.ema):
-                    # Set progress bar and unpack batches
-                    p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='green', disable=is_main_process())
-
-                    # Iterate through the batches
-                    with torch.inference_mode():  
-                        for batch_idx, batch in p_bar:
-                            # Unpack batch and send to device
-                            img, targets = batch
-                            inputs = img.to(self.conf.device, non_blocking=True)
-                            targets = targets.long().to(self.conf.device, non_blocking=True)
-
-                            # Forward pass through model
-                            logits = self.model(inputs)
-
-                            maps = torch.argmax(logits, dim=1)
-
-                            for i, img in enumerate(maps):
-                                global_idx = batch_idx * len(maps) * self.conf.world_size + self.conf.local_rank * len(maps) + i
-                                img = img.detach().cpu().numpy().astype(np.uint8)
-                                if getattr(self, 'map_arr', None) is not None:
-                                    img = self.map_arr[img]
-                                else:
-                                    img *= 20 # Scale outputs to make class distinction clear
-
-                                cv2.imwrite(str(Path(out_dir) / f"{global_idx}.png"), img)
-                             # Update the progress bar
-                            p_bar.set_description(
-                                "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
-                                    epoch=epoch + 1,
-                                    epochs=self.conf.training.epochs,
-                                    batch=batch_idx + 1,
-                                    iter=len(self.val_loader)
-                                )
-                            )
+                self._sanity_check(epoch)
 
             # Logger Logging
             time.sleep(1)
-            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch + 1} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}")
+            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}")
             dist.barrier()
 
-            # logs = {
-            #     "epoch": epoch,
-            #     "train_loss": torch.tensor(train_loss),
-            #     "val_loss": torch.tensor(val_loss),
-            #     "model_state_dict": self.model.state_dict(),
-            # }
+            logs = {
+                "epoch": epoch,
+                "train_loss": torch.tensor(train_loss),
+                "val_loss": torch.tensor(val_loss),
+                "model_state_dict": self.model.state_dict(),
+            }
 
-            # self.logger.info(f"Epoch {logs['epoch'] + 1} Avg Loss, Train Loss: {logs['train_loss'].item()}, Val Loss: {logs['val_loss'].item()}")
-
-            # self.checkpoint(epoch=epoch, logs=logs)
+            self.checkpoint_manager(logs=logs)
 

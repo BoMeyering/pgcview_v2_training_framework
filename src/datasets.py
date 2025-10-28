@@ -252,7 +252,7 @@ class LabeledDataset(Dataset):
         # transform images and targets
         transformed = self.transforms(image=img, target=target)
 
-        return transformed["image"], transformed["target"]
+        return transformed["image"], transformed["target"], img_key
 
     def __len__(self):
         """ Return the length of the LabeledDataset """
@@ -293,7 +293,7 @@ class UnlabeledDataset(Dataset):
             [img for img in glob("*", root_dir=self.img_dir) if img.lower().endswith(("jpg", "jpeg", "png"))]
         )
 
-    def __getitem__(self, index: int) -> Any:
+    def __getitem__(self, index: int) -> Tuple:
         """
         Get one unlabeled image
 
@@ -301,7 +301,7 @@ class UnlabeledDataset(Dataset):
             index (int): Inter index for the item
 
         Returns:
-            Any: Anything
+            Tuple: Anything
         """
         # Get the image name
         img_key = self.img_keys[index]
@@ -315,7 +315,7 @@ class UnlabeledDataset(Dataset):
         # Run weak transforms on image
         weak_img = self.weak_transforms(image=img)['image']
 
-        return weak_img
+        return weak_img, img_key
 
     def __len__(self):
         """ Return the length of the unlabeled dataset """
