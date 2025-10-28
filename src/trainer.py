@@ -235,7 +235,7 @@ class FlexMatchTrainer(Trainer):
             # Update progress bar
             p_bar.set_description(
                 "Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.6f}. Comb. Loss: {loss:.6f}. Conf: {f:.6f}".format(
-                    epoch=epoch + 1,
+                    epoch=epoch,
                     epochs=self.args.model.epochs,
                     batch=batch_idx + 1,
                     iter=self.train_length,
@@ -276,9 +276,6 @@ class FlexMatchTrainer(Trainer):
         loss = self.meters["total_loss"].avg
         l_loss = self.meters["labeled_loss"].avg
         u_loss = self.meters["unlabeled_loss"].avg
-
-        # Set the epoch step
-        epoch_step = epoch + 1
 
         # Epoch Loss Logging
         loss_dict = {
@@ -573,9 +570,6 @@ class SupervisedTrainer(Trainer):
                 tag="epoch_loss/train", scalar_value=avg_loss, global_step=epoch+1
             )
 
-        # Set the epoch step
-        epoch_step = epoch + 1
-
         # Epoch Loss Logging if not in distributed training
         # loss_dict = tag_scalar_dict = {"train_loss": avg_loss}
         # if self.rank == 0:
@@ -669,9 +663,6 @@ class SupervisedTrainer(Trainer):
         # avg_metrics, mc_metrics = self.val_metrics.compute()
         avg_loss = self.meters["val_loss"].mean
 
-        # Epoch step
-        epoch_step = epoch + 1
-
         # Epoch Loss Logging
         loss_dict = {"validation_loss": avg_loss}
 
@@ -758,7 +749,7 @@ class SupervisedTrainer(Trainer):
                     # Update the progress bar
                     p_bar.set_description(
                         "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
-                            epoch=epoch + 1,
+                            epoch=epoch,
                             epochs=self.conf.training.epochs,
                             batch=batch_idx + 1,
                             iter=len(self.val_loader)
