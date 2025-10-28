@@ -7,17 +7,18 @@ BoMeyering 2025
 import torch
 import os
 import logging
+from omegaconf import OmegaConf
 from pathlib import Path
 from datetime import datetime
 
 class CheckpointManager:
-    def __init__(self, checkpoint_dir: str='checkpoints', model_run_name: str='standard_run', monitor: str='val_loss', top_k: int=5, metadata=None):
-        self.checkpoint_dir = Path(checkpoint_dir)
-        self.model_run_name = model_run_name
+    def __init__(self, conf: OmegaConf, monitor: str='val_loss', monitor_op=torch.lt, top_k: int=5):
+        self.checkpoint_dir = Path(conf.directories.checkpoint_dir)
+        self.model_run_name = conf.model_run
         self.monitor = monitor
-        self.monitor_op = torch.lt  # assume lower is better (e.g. val_loss)
+        self.monitor_op = monitor_op  # assume lower is better (e.g. val_loss)
         self.logger = logging.getLogger()
-        self.metadata = metadata if metadata is not None else {}
+        self.metadata = conf
         self.top_k = top_k
         self.top_checkpoints = []  # min-heap of (val_loss, filepath)
 
@@ -27,6 +28,7 @@ class CheckpointManager:
 
     def __call__(self, epoch, logs=None):
         current = logs.get(self.monitor)
+        epoch = logs.get('epoch')
         if current is None:
             self.logger.warning(f"Warning: Metric '{self.monitor}' is not available. Skipping checkpoint.")
             return None

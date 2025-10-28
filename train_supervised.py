@@ -34,6 +34,7 @@ from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
 from src.utils.loggers import setup_loggers, rank_log
 from src.distributed import set_env_ranks, setup_ddp, shutdown_ddp
+from src.callbacks import CheckpointManager
 
 # Create a parser for command line arguments
 parser = ArgumentParser(
@@ -204,6 +205,11 @@ def main(conf: omegaconf.OmegaConf=conf):
         'val_loss_smooth': RunningAvgMeter(window_length=15)
     })
 
+    # Create checkpoint manager
+    checkpoint_manager = CheckpointManager(
+        conf=conf
+    )
+
     # Initialize Trainer
     supervised_trainer = SupervisedTrainer(
         name="my supervised trainer",
@@ -216,6 +222,7 @@ def main(conf: omegaconf.OmegaConf=conf):
         criterion=criterion,
         optimizer=optimizer,
         scheduler=scheduler,
+        checkpoint_manager=checkpoint_manager,
         ema=ema)
 
     # Start training

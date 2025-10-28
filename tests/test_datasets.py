@@ -114,48 +114,49 @@ class TestDatasetIteration(unittest.TestCase):
 
         # Test ordered iteration through the dataset
         for i in range(len(self.l_ds)):
-            img, target = self.l_ds[i]
+            img, target, img_key = self.l_ds[i]
             self.assertIsInstance(img, Tensor)
             self.assertIsInstance(target, Tensor)
+            self.assertIsInstance(img_key, str)
 
         # Test random indices
         for _ in range(50):
             idx = randint(0, 2*len(self.l_ds))
             if idx < len(self.l_ds):
-                img, target = self.l_ds[idx]
+                img, target, img_key = self.l_ds[idx]
                 self.assertIsInstance(img, Tensor)
                 self.assertIsInstance(target, Tensor)
             else:
                 with self.assertRaises(IndexError):
-                    img, target = self.l_ds[idx]
+                    img, target, img_key = self.l_ds[idx]
 
     def test_unlabeled_dataset_iteration(self):
         """ Test UnlabeledDataset Iteration """
 
         # Test ordered iteration through the dataset
         for i in range(len(self.u_ds)):
-            img = self.u_ds[i]
+            img, img_key = self.u_ds[i]
             self.assertIsInstance(img, Tensor)
 
         # Test random indices
         for _ in range(50):
             idx = randint(0, 2*len(self.u_ds))
             if idx < len(self.u_ds):
-                img = self.u_ds[idx]
+                img, img_key = self.u_ds[idx]
                 self.assertIsInstance(img, Tensor)
             else:
                 with self.assertRaises(IndexError):
-                    img = self.u_ds[idx]
+                    img, img_key = self.u_ds[idx]
 
     def test_stat_dataset_iteration(self):
         """ Test StatDataset Iteration """
 
         # Test ordered iteration through the dataset
         for i in range(len(self.s_ds)):
-            batch = self.s_ds[i]
-            self.assertIsInstance(batch, dict)
+            img_dict = self.s_ds[i]
+            self.assertIsInstance(img_dict, dict)
             
-            img, img_key, is_error, errors = batch['img'], batch['img_key'], batch['is_error'], batch['errors']
+            img, img_key, is_error, errors = img_dict['img'], img_dict['img_key'], img_dict['is_error'], img_dict['errors']
             self.assertIsInstance(img, Tensor)
             self.assertIsInstance(img_key, str)
             self.assertIsInstance(is_error, bool)
@@ -165,17 +166,17 @@ class TestDatasetIteration(unittest.TestCase):
         for _ in range(50):
             idx = randint(0, 2*len(self.s_ds))
             if idx < len(self.s_ds):
-                batch = self.s_ds[idx]
-                self.assertIsInstance(batch, dict)
+                img_dict = self.s_ds[idx]
+                self.assertIsInstance(img_dict, dict)
             
-                img, img_key, is_error, errors = batch['img'], batch['img_key'], batch['is_error'], batch['errors']
+                img, img_key, is_error, errors = img_dict['img'], img_dict['img_key'], img_dict['is_error'], img_dict['errors']
                 self.assertIsInstance(img, Tensor)
                 self.assertIsInstance(img_key, str)
                 self.assertIsInstance(is_error, bool)
                 self.assertIsInstance(errors, str)
             else:
                 with self.assertRaises(IndexError):
-                    batch = self.s_ds[idx]
+                    img_dict = self.s_ds[idx]
 
     def test_target_dataset_iteration(self):
         """ Test TargetDataset Iteration """
