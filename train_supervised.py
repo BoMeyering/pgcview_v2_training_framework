@@ -11,12 +11,14 @@ import argparse
 import omegaconf
 import torch.distributed as dist
 from argparse import ArgumentParser
+from pathlib import Path
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.nn import CrossEntropyLoss
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.tensorboard import SummaryWriter
 import torch.distributed as dist
 
 # Local imports
@@ -67,6 +69,7 @@ set_run_name(conf)
 # Set up loggers
 setup_loggers(conf)
 logger = logging.getLogger()
+tb_writer = SummaryWriter(Path('runs') / conf.model_run)
 
 # Set torch device - will set conf.device as 'TYPE:LOCAL_RANK' e.g. 'cuda:0', 'cpu:2' etc
 set_torch_device(conf)
@@ -205,6 +208,7 @@ def main(conf: omegaconf.OmegaConf=conf):
     supervised_trainer = SupervisedTrainer(
         name="my supervised trainer",
         meter_set=meters,
+        tb_writer=tb_writer,
         conf=conf, 
         model=model, 
         train_loader=train_loader, 

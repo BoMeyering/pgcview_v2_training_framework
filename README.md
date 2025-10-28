@@ -3,12 +3,20 @@ This repo holds the model training and test inference code for the PGC View V2 i
 
 Since our dataset is largely unlabeled and unbalanced, we are using a modified version of the FlexMatch semi-supervised learning algorithm to train the segmentation models. You can read the original publication here: [FlexMatch: Boosting Semi-Supervised Learning with Curriculum Pseudo Labeling](https://arxiv.org/abs/2110.08263)
 
+## Run the training script
+Both the fully supervised and semi-supervised training scripts are set up to run using ```torchrun``` and currently work with a single node with multiple GPUs.
+
+```train_supervised.py``` has two flags. ```--config``` is the path to the training config YAML file and defaults to ```configs/train_config.yaml```. ```--backend``` is the torchrun backend engine you want to use - ```nccl``` for CUDA and ```gloo``` for CPU based computation.
+Run the supervised script like
+```
+$ torchrun --standalon --nproc-per-node=$NUM_PROCESSES train_supervised.py --backend='nccl'
+```
 ## To Do
 
 - [x] Finish the FlexMatch trainer class
 - [x] Format dataset and run Welford calculator to find RGB means and Std.
 - [x] Create a Labelbox API call script to pull in the annotations from our labeling project and automatically move images from 'all_images' into the labeled and unlabeled folders.
-- [ ] Work on training supervised script
+- [x] Work on training supervised script
 - [ ] Create a new train and inference script.
 
 ## Loss Functions
