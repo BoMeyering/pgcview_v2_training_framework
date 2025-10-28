@@ -5,6 +5,7 @@ BoMeyering 2025
 """
 
 import logging
+import torch
 import sys
 import omegaconf
 from pathlib import Path
@@ -48,3 +49,4 @@ def rank_log(main_process: bool, fn, *args, **kwargs):
     """
     if main_process:
         fn(*args, **kwargs)
+

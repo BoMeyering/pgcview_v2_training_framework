@@ -1,13 +1,11 @@
-
 # Training configs
-model_run: model_run
+model_run: segformer_b1
 
 # Computation Device
-device: cpu
+device: cuda
 
 # Images
 images:
-  input_channels: 3
   resize: [1024, 1024]
 
 # Metadata for normalization
@@ -29,14 +27,14 @@ directories:
 
 # Training
 training:
-  epochs: 30
+  epochs: 40
   sanity_check: True
 
 # Model Architecture
 model:
-  architecture: DEEPLABV3PLUS
+  architecture: SEGFORMER
   config:
-    encoder_name: efficientnet-b0
+    encoder_name: efficientnet-b1
     encoder_depth: 5
     encoder_weights: imagenet
     input_channels: 3
@@ -70,7 +68,7 @@ loss:
 
 # Batch Sizes
 batch_size:
-  labeled: 8
+  labeled: 6
   unlabeled: 2
 
 # Flexmatch
