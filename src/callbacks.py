@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-class ModelCheckpoint:
+class CheckpointManager:
     def __init__(self, checkpoint_dir: str='checkpoints', model_run_name: str='standard_run', monitor: str='val_loss', top_k: int=5, metadata=None):
         self.checkpoint_dir = Path(checkpoint_dir)
         self.model_run_name = model_run_name
