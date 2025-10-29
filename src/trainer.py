@@ -26,6 +26,7 @@ import numpy as np
 
 from typing import Union, Optional, Any, Tuple
 from torch.utils.tensorboard import SummaryWriter
+from torchmetrics import MeanMetric
 from src.flexmatch import get_pseudo_labels
 from src.parameters import EMA, apply_ema
 # from src.callbacks import ModelCheckpoint
@@ -454,6 +455,8 @@ class SupervisedTrainer(Trainer):
         self.logger = logging.getLogger()
         self.sanity_check = sanity_check
         self.checkpoint_manager = checkpoint_manager
+        self.train_loss_metric = MeanMetric().to(self.conf.device)
+        self.val_loss_metric = MeanMetric().to(self.conf.device)
 
         # Load in target mapping
         if self.conf.metadata.target_mapping_path:
@@ -506,10 +509,10 @@ class SupervisedTrainer(Trainer):
         # Put model in training mode and reset meters
         self.model.train()
         self.meters.reset()
-        # self.train_metrics.reset()
+        self.train_loss_metric.reset()
 
         # Set progress bar and unpack batches
-        p_bar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), colour='yellow', disable=is_main_process())
+        p_bar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), colour='yellow', disable=not is_main_process())
 
         # Iterate through the batches
         for batch_idx, batch in p_bar:
@@ -523,10 +526,12 @@ class SupervisedTrainer(Trainer):
 
             # Update the training loss meter after loss.backward() so all loss has been all-reduced
             update_dict = {
-                'train_loss': {'val': loss.item(), 'n': logits.size()[0]},
                 'train_loss_smooth': {'val': loss.item(), 'n': 1}
             }
             self.meters.update(update_dict)
+
+            # Add training loss to MeanMetric (for unified validation loss over all ranks in DDP)
+            self.train_loss_metric.update(loss.detach(), weight=logits.size()[0])
 
             # Step optimizer and update parameters for EMA
             self.optimizer.step()
@@ -552,43 +557,21 @@ class SupervisedTrainer(Trainer):
                 self.tb_writer.add_scalar(
                     tag="batch_loss/train", scalar_value=loss.item(), global_step=batch_step
                 )
-
-        # Distributed barrier
+        
+        # ddp barrier
         dist.barrier()
 
-        # Step LR scheduler
-        if self.scheduler:
-            self.scheduler.step()
+        # Compute avg loss (auto syncs across ranks)
+        avg_loss = self.train_loss_metric.compute().item()
 
         # Compute epoch metrics and loss
         # avg_metrics, mc_metrics = self.train_metrics.compute()
-        avg_loss = self.meters['train_loss'].mean
         
         # Tensorboard epoch logging
         if dist.get_rank() == 0:
             self.tb_writer.add_scalar(
-                tag="epoch_loss/train", scalar_value=avg_loss, global_step=epoch+1
+                tag="epoch_loss/train", scalar_value=avg_loss, global_step=epoch
             )
-
-        # Epoch Loss Logging if not in distributed training
-        # loss_dict = tag_scalar_dict = {"train_loss": avg_loss}
-        # if self.rank == 0:
-        #     self.tb_logger.log_scalar_dict(
-        #         main_tag="epoch_loss", scalar_dict=loss_dict, step=epoch_step
-        #     )
-
-        #     # Epoch Average Metric Logging
-        #     self.tb_logger.log_scalar_dict(
-        #         main_tag="epoch_train_metrics", scalar_dict=avg_metrics, step=epoch_step
-        #     )
-
-        #     # Epoch Multiclass Metric Logging
-        #     self.tb_logger.log_tensor_dict(
-        #         main_tag="epoch_train_metrics",
-        #         tensor_dict=mc_metrics,
-        #         step=epoch_step,
-        #         class_map=self.class_map,
-        #     )
 
         return avg_loss
 
@@ -621,10 +604,11 @@ class SupervisedTrainer(Trainer):
         # Put model in eval mode and reset meters
         self.model.eval()
         self.meters.reset()
+        self.val_loss_metric.reset()
 
         with apply_ema(self.ema):
             # Set progress bar and unpack batches
-            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='blue', disable=is_main_process())
+            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='blue', disable=not is_main_process())
 
             # Iterate through the batches
             with torch.inference_mode():  
@@ -635,10 +619,12 @@ class SupervisedTrainer(Trainer):
 
                     # Update the validation loss meter
                     update_dict = {
-                        'val_loss': {'val': loss.item(), 'n': logits.size()[0]},
                         'val_loss_smooth': {'val': loss.item(), 'n': 1}
                     }
                     self.meters.update(update_dict)
+
+                    # Add validation loss to MeanMetric (for unified validation loss over all ranks in DDP)
+                    self.val_loss_metric.update(loss.detach(), weight=logits.size()[0])
 
                     # Update the progress bar
                     p_bar.set_description(
@@ -658,57 +644,20 @@ class SupervisedTrainer(Trainer):
                         self.tb_writer.add_scalar(
                             tag="batch_loss/val", scalar_value=loss.item(), global_step=batch_step
                         )
+        # ddp barrier
+        dist.barrier()
+
+        # Compute avg loss (auto syncs across ranks)
+        avg_loss = self.val_loss_metric.compute().item()
 
         # Compute epoch metrics
         # avg_metrics, mc_metrics = self.val_metrics.compute()
-        avg_loss = self.meters["val_loss"].mean
-
-        # Epoch Loss Logging
-        loss_dict = {"validation_loss": avg_loss}
 
         # Tensorboard epoch logging
         if dist.get_rank() == 0:
             self.tb_writer.add_scalar(
-                tag="epoch_loss/val", scalar_value=avg_loss, global_step=epoch+1
+                tag="epoch_loss/val", scalar_value=avg_loss, global_step=epoch
             )
-
-        # if self.rank == 0:
-        #     self.tb_logger.log_scalar_dict(
-        #         main_tag="epoch_loss", scalar_dict=loss_dict, step=epoch_step
-        #     )
-
-        #     # Epoch Average Validation Metric Logging
-        #     self.tb_logger.log_scalar_dict(
-        #         main_tag="epoch_val_metrics", scalar_dict=avg_metrics, step=epoch_step
-        #     )
-
-        #     # Epoch Multiclass Validation Metric Logging
-        #     self.tb_logger.log_tensor_dict(
-        #         main_tag="epoch_val_metrics",
-        #         tensor_dict=mc_metrics,
-        #         step=epoch_step,
-        #         class_map=self.class_map
-        #     )
-
-        #     # Update the epoch in the DistributedSampler
-        #     if self.train_sampler is not None:
-        #         self.train_sampler.set_epoch(epoch)
-
-
-        #     # Train and validate one epoch
-        #     train_loss = self._train_epoch(epoch)
-        #     # val_loss = self._val_epoch(epoch)
-
-        #     logs = {
-        #         "epoch": epoch,
-        #         "train_loss": torch.tensor(train_loss),
-        #         # "val_loss": torch.tensor(val_loss),
-        #         "model_state_dict": self.model.state_dict(),
-        #     }
-
-            
-
-        #     self.checkpoint(epoch=epoch, logs=logs)
 
         return avg_loss
 
@@ -721,7 +670,7 @@ class SupervisedTrainer(Trainer):
             
         with apply_ema(self.ema):
             # Set progress bar and unpack batches
-            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='green', disable=is_main_process())
+            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='green', disable=not is_main_process())
 
             # Iterate through the batches
             with torch.inference_mode():  
@@ -788,4 +737,8 @@ class SupervisedTrainer(Trainer):
             }
 
             self.checkpoint_manager(logs=logs)
+
+            # Step LR scheduler
+            if self.scheduler:
+                self.scheduler.step()
 

@@ -199,8 +199,6 @@ def main(conf: omegaconf.OmegaConf=conf):
 
     # Create MeterSet
     meters = MeterSet({
-        'train_loss': ValueMeter(),
-        'val_loss': ValueMeter(),
         'train_loss_smooth': RunningAvgMeter(window_length=15),
         'val_loss_smooth': RunningAvgMeter(window_length=15)
     })

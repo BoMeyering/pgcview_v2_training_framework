@@ -10,6 +10,7 @@ import logging
 from omegaconf import OmegaConf
 from pathlib import Path
 from datetime import datetime
+from src.utils.loggers import rank_log
 
 class CheckpointManager:
     def __init__(self, conf: OmegaConf, monitor: str='val_loss', monitor_op=torch.lt, top_k: int=5):
@@ -18,35 +19,36 @@ class CheckpointManager:
         self.monitor = monitor
         self.monitor_op = monitor_op  # assume lower is better (e.g. val_loss)
         self.logger = logging.getLogger()
-        self.metadata = conf
+        self.conf = conf
         self.top_k = top_k
         self.top_checkpoints = []  # min-heap of (val_loss, filepath)
 
-        if not os.path.exists(self.checkpoint_dir):
-            self.logger.info(f"Creating new checkpoint dir at '{self.checkpoint_dir}'.")
-            os.makedirs(self.checkpoint_dir, exist_ok=True)
+        self.checkpoint_sub_dir = Path(self.checkpoint_dir) / self.model_run_name
+        if not os.path.exists(self.checkpoint_sub_dir):
+            rank_log(self.conf.is_main, self.logger.info, f"Creating new checkpoint dir at '{self.checkpoint_sub_dir}'.")
+            if self.conf.is_main:
+                os.makedirs(self.checkpoint_sub_dir, exist_ok=True)
 
-    def __call__(self, epoch, logs=None):
+    def __call__(self, logs=None):
         current = logs.get(self.monitor)
         epoch = logs.get('epoch')
         if current is None:
-            self.logger.warning(f"Warning: Metric '{self.monitor}' is not available. Skipping checkpoint.")
+            rank_log(self.conf.is_main, self.logger.warning, f"Warning: Metric '{self.monitor}' is not available. Skipping checkpoint.")
             return None
 
         # If we don't have enough checkpoints yet or current is better than the worst of top_k
         should_save = len(self.top_checkpoints) < self.top_k or self.monitor_op(current, self.top_checkpoints[-1][0])
-        if should_save:
-            # now = datetime.now().isoformat(timespec='seconds', sep='_').replace(":", ".")
-            chkpt_filename = self.checkpoint_dir / f"{self.model_run_name}_epoch_{epoch}_vloss-{current:.6f}.pth"
+        if should_save and self.conf.is_main:
+            chkpt_filename = self.checkpoint_sub_dir / f"{self.model_run_name}_epoch_{epoch}_vloss-{current:.6f}.pth"
             chkpt = {
                 'model_state_dict': logs['model_state_dict'],
                 'epoch': epoch,
                 'monitor': self.monitor,
                 self.monitor: current,
-                **self.metadata
+                **self.conf
             }
             torch.save(chkpt, chkpt_filename)
-            self.logger.info(f"Epoch {epoch} - '{self.monitor}' improved or is in top-{self.top_k}. Saved to {chkpt_filename}")
+            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} - '{self.monitor}' improved or is in top-{self.top_k}. Saved to {chkpt_filename}")
 
             self.top_checkpoints.append((current, chkpt_filename))
             self.top_checkpoints.sort(key=lambda x: x[0])  # sort by val_loss (ascending)
@@ -56,6 +58,6 @@ class CheckpointManager:
                 worst_loss, worst_path = self.top_checkpoints.pop()
                 if os.path.exists(worst_path):
                     os.remove(worst_path)
-                    self.logger.info(f"Removed checkpoint: {worst_path} with {self.monitor}={worst_loss:.6f} (no longer in top-{self.top_k})")
+                    rank_log(self.conf.is_main, self.logger.info, f"Removed checkpoint: {worst_path} with {self.monitor}={worst_loss:.6f} (no longer in top-{self.top_k})")
         else:
-            self.logger.info(f"Epoch {epoch} - '{self.monitor}' did not improve top-{self.top_k}. Skipping checkpoint.")
+            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} - '{self.monitor}' did not improve top-{self.top_k}. Skipping checkpoint.")
