@@ -245,16 +245,16 @@ class MetricLogger:
         """
         self.avg_metrics = MetricCollection(
             [
-                MeanIoU(num_classes=num_classes, per_class=False, input_format='mixed').to(device),
-                GeneralizedDiceScore(num_classes=num_classes, per_class=False, input_format='mixed').to(device),
-                HausdorffDistance(num_classes=num_classes, input_format='mixed').to(device)
+                MeanIoU(num_classes=num_classes, per_class=False, input_format='index').to(device),
+                GeneralizedDiceScore(num_classes=num_classes, per_class=False, input_format='index').to(device),
+                # HausdorffDistance(num_classes=num_classes, input_format='index').to(device)
             ]
         )
 
         self.mc_metrics = MetricCollection(
             [
-                MeanIoU(num_classes=num_classes, per_class=True, input_format='mixed').to(device),
-                GeneralizedDiceScore(num_classes=num_classes, per_class=True, input_format='mixed').to(device),
+                MeanIoU(num_classes=num_classes, per_class=True, input_format='index').to(device),
+                GeneralizedDiceScore(num_classes=num_classes, per_class=True, input_format='index').to(device),
             ]
         )
 
@@ -277,16 +277,34 @@ class MetricLogger:
         except Exception as e:
             logger.error(f"Encountered error when computing metrics. Error: {e}")
             self.results['avg'], self.results['mc'] = None, None
-        return self.results
     
-    def __str__(self, type: str=None):
+    def __str__(self) -> str:
+        """
+        Nicely format the metric results for printing.
+        """
+        lines = []
+
+        def _format_dict(name: str, d: dict):
+            if d is None or len(d) == 0:
+                return f"{name}: None"
+            out = [f"{name}:"]
+            for k, v in d.items():
+                # handle tensor outputs from torchmetrics
+                if isinstance(v, torch.Tensor):
+                    if v.numel() == 1:
+                        v = round(v.item(), 5)
+                    else:
+                        v = [round(float(x), 5) for x in v.flatten().tolist()]
+                if isinstance(v, float):
+                    out.append(f"  {k:<20s}: {v:.4f}")
+                else:
+                    out.append(f"  {k:<20s}: {v}")
+            return "\n".join(out)
         
-        if type=='avg':
-            print(self.results['avg'])
-        elif type=='mc':
-            print(self.results['mc'])
-        elif type=='both':
-            print(self.results)
+        lines.append(_format_dict("Average metrics", self.results.get("avg")))
+        lines.append(_format_dict("Multi-class metrics", self.results.get("mc")))
+
+        return "\n" + "\n".join(lines)
 
     def reset(self):
         """ Rest Metric Collections """
