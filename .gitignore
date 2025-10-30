@@ -165,5 +165,10 @@ data/raw/labeled
 data/processed/**/*.jpg
 data/processed/**/*.jpeg
 data/processed/**/*.png
+model_checkpoints/**/*.pth
+outputs/**/*.jpeg
+outputs/**/*.png
+runs/
+logs/
 *.insyncdl
 .VSCodeCounter

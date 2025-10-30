@@ -470,12 +470,12 @@ class SupervisedTrainer(Trainer):
             self.map_arr = map_arr
 
         # Set up metrics class
-        # self.train_metrics = MetricLogger(
-        #     num_classes=self.conf.model.config.classes, device=self.conf.device
-        # )
-        # self.val_metrics = MetricLogger(
-        #     num_classes=self.conf.model.config.classes, device=self.conf.device
-        # )
+        self.train_metrics = MetricLogger(
+            num_classes=self.conf.model.config.classes, device=self.conf.device
+        )
+        self.val_metrics = MetricLogger(
+            num_classes=self.conf.model.config.classes, device=self.conf.device
+        )
 
     def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Train over one batch
@@ -497,10 +497,10 @@ class SupervisedTrainer(Trainer):
         loss = self.criterion(logits, targets)
 
         # Get the class predictions
-        # preds = torch.argmax(logits, dim=1).to(self.conf.device)
+        preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
         # Update the training metrics
-        # self.train_metrics.update(preds=preds, targets=targets)
+        self.train_metrics.update(preds=preds, targets=targets)
 
         return loss, logits
 
@@ -565,7 +565,8 @@ class SupervisedTrainer(Trainer):
         avg_loss = self.train_loss_metric.compute().item()
 
         # Compute epoch metrics and loss
-        # avg_metrics, mc_metrics = self.train_metrics.compute()
+        self.train_metrics.compute()
+        rank_log(self.conf.is_main, self.logger.info, self.train_metrics)
         
         # Tensorboard epoch logging
         if dist.get_rank() == 0:
@@ -591,10 +592,10 @@ class SupervisedTrainer(Trainer):
         loss = self.criterion(logits, targets)
 
         # Get the class predictions
-        # preds = torch.argmax(logits, dim=1).to(self.conf.device)
+        preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
         # Update the validation metrics
-        # self.val_metrics.update(preds=preds, targets=targets)
+        self.val_metrics.update(preds=preds, targets=targets)
 
         return loss, logits
 
@@ -651,7 +652,8 @@ class SupervisedTrainer(Trainer):
         avg_loss = self.val_loss_metric.compute().item()
 
         # Compute epoch metrics
-        # avg_metrics, mc_metrics = self.val_metrics.compute()
+        self.val_metrics.compute()
+        rank_log(self.conf.is_main, self.logger.info, self.val_metrics)
 
         # Tensorboard epoch logging
         if dist.get_rank() == 0:
