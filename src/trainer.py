@@ -471,10 +471,14 @@ class SupervisedTrainer(Trainer):
 
         # Set up metrics class
         self.train_metrics = MetricLogger(
-            num_classes=self.conf.model.config.classes, device=self.conf.device
+            name='Train Metrics',
+            num_classes=self.conf.model.config.classes, 
+            device=self.conf.device
         )
         self.val_metrics = MetricLogger(
-            num_classes=self.conf.model.config.classes, device=self.conf.device
+            name='Validation Metrics',
+            num_classes=self.conf.model.config.classes, 
+            device=self.conf.device
         )
 
     def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:

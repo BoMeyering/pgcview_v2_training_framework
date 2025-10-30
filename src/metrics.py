@@ -232,7 +232,7 @@ class MeterSet:
 
 class MetricLogger:
     """ Wrapper for torchmetrics.MetricCollection """
-    def __init__(self, num_classes: int, device: str):
+    def __init__(self, name: str, num_classes: int, device: str):
         """
         Initialize the MetricLogger
 
@@ -243,6 +243,7 @@ class MetricLogger:
             device : torch.device
                 The computational device for metric calculation
         """
+        self.name = name
         self.avg_metrics = MetricCollection(
             [
                 MeanIoU(num_classes=num_classes, per_class=False, input_format='index').to(device),
@@ -282,27 +283,27 @@ class MetricLogger:
         """
         Nicely format the metric results for printing.
         """
-        lines = []
+        lines = [self.name + ":"]
 
         def _format_dict(name: str, d: dict):
             if d is None or len(d) == 0:
-                return f"{name}: None"
-            out = [f"{name}:"]
+                return f"   {name}: None"
+            out = [f"   {name}:"]
             for k, v in d.items():
                 # handle tensor outputs from torchmetrics
                 if isinstance(v, torch.Tensor):
                     if v.numel() == 1:
-                        v = round(v.item(), 5)
+                        v = f"{v.item():.5f}"
                     else:
-                        v = [round(float(x), 5) for x in v.flatten().tolist()]
+                        v = [round(x, 5) for x in v.flatten().tolist()]
                 if isinstance(v, float):
-                    out.append(f"  {k:<20s}: {v:.4f}")
+                    out.append(f"       {k:<20s}: {v:.4f}")
                 else:
-                    out.append(f"  {k:<20s}: {v}")
+                    out.append(f"       {k:<20s}: {v}")
             return "\n".join(out)
         
-        lines.append(_format_dict("Average metrics", self.results.get("avg")))
-        lines.append(_format_dict("Multi-class metrics", self.results.get("mc")))
+        lines.append(_format_dict("Average", self.results.get("avg")))
+        lines.append(_format_dict("Multi-class", self.results.get("mc")))
 
         return "\n" + "\n".join(lines)
 
