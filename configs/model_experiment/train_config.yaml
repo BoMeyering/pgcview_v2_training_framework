@@ -1,5 +1,5 @@
 # Training configs
-model_run: unet_resnet18_test
+model_run: unet_enb1_512
 
 # Computation Device
 device: cuda
@@ -14,10 +14,11 @@ metadata:
 
 # Logging
 logging_level: DEBUG
+tb_exclude_classes: [8, 9, 10, 11]
 
 # Directories
 directories:
-  train_labeled_dir: data/toy_dataset/train/labeled
+  train_labeled_dir: data/raw/labeled
   train_unlabeled_dir: data/toy_dataset/train/unlabeled
   val_dir: data/toy_dataset/val
   test_dir: data/toy_dataset/test
@@ -32,9 +33,9 @@ training:
 
 # Model Architecture
 model:
-  architecture: UNET
+  architecture: SEGFORMER
   config:
-    encoder_name: resnet18
+    encoder_name: efficientnet-b1
     encoder_depth: 5
     encoder_weights: imagenet
     input_channels: 3
@@ -60,15 +61,15 @@ scheduler:
 
 # Criterion / Loss Function
 loss:
-  name: CELOSS
+  name: RECALLLOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   use_weights: false
-  loss_type: CELOSS
+  loss_type: FOCALLOSS
 
 # Batch Sizes
 batch_size:
-  labeled: 8
+  labeled: 6
   unlabeled: 2
 
 # Flexmatch

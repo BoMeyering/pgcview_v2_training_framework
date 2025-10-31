@@ -9,6 +9,7 @@ Unlabeled images will be moved to data/raw/unlabeled
 BoMeyering 2025
 """
 import dotenv
+from tqdm import tqdm
 from datetime import datetime, timedelta
 import time
 import urllib
@@ -27,7 +28,7 @@ import shutil
 dotenv.load_dotenv()
 
 API_KEY = os.environ.get('API_KEY')
-OUTPUT_JSON_PATH = 'export.json'
+OUTPUT_JSON_PATH = 'data/pgcviewv2_label_export.json'
 PROJECT_KEY = 'cma74xh22061607ysdyf4gudl'
 
 client = lb.Client(api_key=API_KEY)
@@ -48,20 +49,15 @@ export_params= {
 # filters= {"workflow_status": "Done"}
 
 now = datetime.now().replace(microsecond=0)
+EXPORT = True
 if os.path.exists(OUTPUT_JSON_PATH):
     with open(OUTPUT_JSON_PATH, 'r') as f:
         data = json.load(f)
         if 'export_time' in data:
-            export_time = data['export_time']
-            export_time = datetime.strptime(export_time, "%Y-%m-%d %H:%M:%S")
-            # export_time = datetime.strptime(export_time, format_string)
+            export_time = datetime.strptime(data['export_time'], "%Y-%m-%d %H:%M:%S")
             time_diff = now - export_time
             if time_diff < timedelta(days=0, hours=6):
                 EXPORT = False
-else:
-    EXPORT = True
-
-EXPORT = True
 
 if EXPORT:
     print(f'Currently exporting data rows from project {PROJECT_KEY}')
@@ -69,16 +65,23 @@ if EXPORT:
     export_task.wait_till_done()
 
     export_json = {
-        'export_time': str(now)
+        'export_time': str(now),
+        'data_rows': {}
     }
 
-    for data_row in export_task.get_buffered_stream():
+    for data_row in tqdm(export_task.get_buffered_stream(), colour='green', desc='Exporting Data Rows'):
+        data_row = data_row.json
         external_id = data_row['data_row']['external_id']
-        print(external_id)
+        
+        export_json['data_rows'][external_id] = data_row
+
+    with open(OUTPUT_JSON_PATH, 'w') as f:
+        json.dump(export_json, f)
+    print("Export Complete!")
 else:
     sys.exit(0)
 
-print("Currently Exporting")
+
 # export_task = project.export(params=export_params, filters=filters)
 
 
@@ -86,9 +89,9 @@ print("Currently Exporting")
 # def json_stream_handler(output: lb.BufferedJsonConverterOutput):
 #     print(output.json)
 
-export_json = {'export_time': datetime}
 
-print(export_json)
+
+
 # for data_row in export_task.get_buffered_stream():
         
 
@@ -103,8 +106,6 @@ print(export_json)
 #         map_dict = json.load(f)
 
 # print(map_dict)
-
-RENAMED_IMAGE_DIR = Path('data/PGCView_v2/renamed_images')
 
 # for i, row in enumerate(export_json):
 #     image_url = row['data_row']['row_data']

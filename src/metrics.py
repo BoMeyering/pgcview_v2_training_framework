@@ -311,4 +311,3 @@ class MetricLogger:
         """ Rest Metric Collections """
         self.avg_metrics.reset()
         self.mc_metrics.reset()
-
