@@ -1,5 +1,5 @@
 # Training configs
-model_run: segformer_b1
+model_run: dlv3p_mit_b0
 
 # Computation Device
 device: cuda
@@ -14,6 +14,7 @@ metadata:
 
 # Logging
 logging_level: DEBUG
+tb_exclude_classes: [8, 9, 10, 11]
 
 # Directories
 directories:
@@ -32,9 +33,9 @@ training:
 
 # Model Architecture
 model:
-  architecture: SEGFORMER
+  architecture: DEEPLABV3PLUS
   config:
-    encoder_name: efficientnet-b1
+    encoder_name: mit_b0
     encoder_depth: 5
     encoder_weights: imagenet
     input_channels: 3

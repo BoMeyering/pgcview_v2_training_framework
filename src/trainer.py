@@ -24,7 +24,7 @@ import torch
 import torch.distributed as dist
 import numpy as np
 
-from typing import Union, Optional, Any, Tuple
+from typing import Union, Optional, Any, Tuple, List
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics import MeanMetric
 from src.flexmatch import get_pseudo_labels
@@ -461,9 +461,9 @@ class SupervisedTrainer(Trainer):
         # Load in target mapping
         if self.conf.metadata.target_mapping_path:
             with open(self.conf.metadata.target_mapping_path, 'r') as f:
-                map_dict = json.load(f)
-            map_arr = np.zeros((len(map_dict), 3)).astype(np.uint8)
-            for k, v in map_dict.items():
+                self.map_dict = json.load(f)
+            map_arr = np.zeros((len(self.map_dict), 3)).astype(np.uint8)
+            for k, v in self.map_dict.items():
                 idx = v['class_idx']
                 map_arr[idx] = v['rgb'][::-1]
 
@@ -578,6 +578,13 @@ class SupervisedTrainer(Trainer):
                 tag="epoch_loss/train", scalar_value=avg_loss, global_step=epoch
             )
 
+            self._tb_log_metrics(
+                self.train_metrics.results, 
+                main_tag="train_metrics", 
+                global_step=epoch, 
+                exclude_idx=self.conf.tb_exclude_classes
+            )
+
         return avg_loss
 
     @torch.no_grad()
@@ -664,6 +671,12 @@ class SupervisedTrainer(Trainer):
             self.tb_writer.add_scalar(
                 tag="epoch_loss/val", scalar_value=avg_loss, global_step=epoch
             )
+            self._tb_log_metrics(
+                self.val_metrics.results, 
+                main_tag="val_metrics", 
+                global_step=epoch,
+                exclude_idx=self.conf.tb_exclude_classes
+            )
 
         return avg_loss
 
@@ -710,6 +723,19 @@ class SupervisedTrainer(Trainer):
                             iter=len(self.val_loader)
                         )
                     )
+    def _tb_log_metrics(self, metric_dict: dict, main_tag: str, global_step: int, exclude_idx: Optional[List[int]]=None):
+        """ Log metrics from a metric dictionary to TensorBoard """
+        for type, v in metric_dict.items(): # type is 'avg' or 'mc'
+            if type == 'avg':
+                for mk, mv in v.items(): # mk is the metric name, mv is the metric value as a torch.Tensor
+                    self.tb_writer.add_scalar(f"{main_tag}/avg_{mk}", mv.item(), global_step=global_step)
+            elif type == 'mc':
+                metric_map = {data['class_idx']: cname for cname, data in self.map_dict.items()} # Create a mapping from class index (int) to class name (str)
+                for mk, mv in v.items():
+                    scalar_dict = {metric_map.get(i): t.item() for i, t in enumerate(mv) if i not in exclude_idx} # Map the tensor values to a new dict with class names as keys
+                    for sk, sv in scalar_dict.items():
+                        self.tb_writer.add_scalar(f"{main_tag}/{sk}_{mk}", sv, global_step=global_step)
+
 
     def train(self):
         """ Train the model """

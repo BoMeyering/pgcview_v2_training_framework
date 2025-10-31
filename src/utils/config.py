@@ -159,6 +159,7 @@ class TrainSupervisedConfig:
     images: Images=field(default_factory=Images)
     metadata: Metadata=field(default_factory=Metadata)
     logging_level: str='INFO'
+    tb_exclude_classes: Optional[List[int]]=None
     directories: Directories=field(default_factory=Directories)
     training: Training=field(default_factory=Training)
     model: Model=field(default_factory=Model)

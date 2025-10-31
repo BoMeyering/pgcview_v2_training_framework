@@ -49,7 +49,7 @@ logger.addHandler(stream_handler)
 
 # Grab config and parse
 parser = argparse.ArgumentParser(description="Use this script to calculate the RGB channel means and standard deviations")
-parser.add_argument('-c', '--config', help="The path to the yaml configuration file which defines the directories containing the images")
+parser.add_argument('-c', '--config', default='configs/metadata/calc_mean_and_std.yaml', help="The path to the yaml configuration file which defines the directories containing the images")
 parser.add_argument('-r', '--recalculate', default=False, help="Boolean. Should previously calcualted values be overwritten?")
 args = parser.parse_args()
 
@@ -115,7 +115,7 @@ def main(conf: OmegaConf) -> Tuple[torch.Tensor, torch.Tensor]:
         iter_loader = iter(dl)
 
         # Main directory loop
-        pbar = tqdm(total=len(dl), desc="Overall Progress", unit="image")
+        pbar = tqdm(total=len(dl), desc="Overall Progress", unit="image", colour='blue')
         for batch in iter_loader:
             # unpack the batch
             img, img_key, is_error = batch['img'], batch['img_key'][0], batch['is_error'].item()
@@ -159,6 +159,8 @@ if __name__ == '__main__':
         'means': [i.item() for i in means],
         'std': [i.item() for i in std]
     }
+
+    logger.info(f'Calculated means and std: {norm_dict}')
 
     with open(conf.out_path, 'w') as f:
         json.dump(norm_dict, f)
