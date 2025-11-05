@@ -651,7 +651,7 @@ class SupervisedTrainer(Trainer):
                     )
 
                     # Tensorboard batch writing
-                    batch_step = ((epoch-1) * len(self.train_loader)) + batch_idx
+                    batch_step = ((epoch-1) * len(self.val_loader)) + batch_idx
                     if dist.get_rank() == 0:
                         self.tb_writer.add_scalar(
                             tag="batch_loss/val", scalar_value=loss.item(), global_step=batch_step
@@ -683,6 +683,7 @@ class SupervisedTrainer(Trainer):
     def _sanity_check(self, epoch):
         """ Run a sanity check for the model """
         rank_log(self.conf.is_main, self.logger.info, f"SANITY CHECK {epoch}")
+
         out_dir = Path(self.conf.directories.output_dir) / self.conf.model_run / "_".join(["epoch", str(epoch)])
         if self.conf.local_rank == 0:
             os.makedirs(out_dir)
@@ -694,35 +695,36 @@ class SupervisedTrainer(Trainer):
             # Iterate through the batches
             with torch.inference_mode():  
                 for batch_idx, batch in p_bar:
-                    # Unpack batch and send to device
-                    img, targets, img_keys = batch
-                    inputs = img.to(self.conf.device, non_blocking=True)
-                    targets = targets.long().to(self.conf.device, non_blocking=True)
+                    if batch_idx % 10 == 0:
+                        # Unpack batch and send to device
+                        img, targets, img_keys = batch
+                        inputs = img.to(self.conf.device, non_blocking=True)
+                        targets = targets.long().to(self.conf.device, non_blocking=True)
 
-                    # Forward pass through model
-                    logits = self.model(inputs)
+                        # Forward pass through model
+                        logits = self.model(inputs)
 
-                    maps = torch.argmax(logits, dim=1)
+                        maps = torch.argmax(logits, dim=1)
 
-                    # for i, img in enumerate(maps):
-                    for img_key, img in zip(img_keys, maps):
-                        img = img.detach().cpu().numpy().astype(np.uint8)
-                        if getattr(self, 'map_arr', None) is not None:
-                            img = self.map_arr[img]
-                        else:
-                            img *= 20 # Scale outputs to make class distinction clear
+                        # for i, img in enumerate(maps):
+                        for img_key, img in zip(img_keys, maps):
+                            img = img.detach().cpu().numpy().astype(np.uint8)
+                            if getattr(self, 'map_arr', None) is not None:
+                                img = self.map_arr[img]
+                            else:
+                                img *= 20 # Scale outputs to make class distinction clear
 
-                        cv2.imwrite(str(Path(out_dir) / f"{Path(img_key).stem}_outmap.png"), img)
-                    
-                    # Update the progress bar
-                    p_bar.set_description(
-                        "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
-                            epoch=epoch,
-                            epochs=self.conf.training.epochs,
-                            batch=batch_idx + 1,
-                            iter=len(self.val_loader)
+                            cv2.imwrite(str(Path(out_dir) / f"{Path(img_key).stem}_outmap.png"), img)
+                        
+                        # Update the progress bar
+                        p_bar.set_description(
+                            "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
+                                epoch=epoch,
+                                epochs=self.conf.training.epochs,
+                                batch=batch_idx + 1,
+                                iter=len(self.val_loader)
+                            )
                         )
-                    )
     def _tb_log_metrics(self, metric_dict: dict, main_tag: str, global_step: int, exclude_idx: Optional[List[int]]=None):
         """ Log metrics from a metric dictionary to TensorBoard """
         for type, v in metric_dict.items(): # type is 'avg' or 'mc'

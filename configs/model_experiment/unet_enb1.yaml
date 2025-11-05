@@ -1,12 +1,12 @@
 # Training configs
-model_run: dlv3p_enb1
+model_run: model_exp_unet_enb1
 
 # Computation Device
 device: cuda
 
 # Images
 images:
-  resize: [1024, 1024]
+  resize: [512, 512]
 
 # Metadata for normalization
 metadata:
@@ -28,12 +28,12 @@ directories:
 
 # Training
 training:
-  epochs: 40
+  epochs: 100
   sanity_check: True
 
 # Model Architecture
 model:
-  architecture: DEEPLABV3PLUS
+  architecture: UNET
   config:
     encoder_name: efficientnet-b1
     encoder_depth: 5
@@ -61,7 +61,7 @@ scheduler:
 
 # Criterion / Loss Function
 loss:
-  name: RECALLLOSS
+  name: CELOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   use_weights: false

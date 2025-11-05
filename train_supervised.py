@@ -133,10 +133,10 @@ def main(conf: omegaconf.OmegaConf=conf):
         transforms=val_transforms
     )
 
-    test_ds = LabeledDataset(
-        root_dir=conf.directories.test_dir,
-        transforms=test_transforms
-    )
+    # test_ds = LabeledDataset(
+    #     root_dir=conf.directories.test_dir,
+    #     transforms=test_transforms
+    # )
 
     # Create distributed Samplers
     train_sampler = DistributedSampler(
@@ -151,12 +151,12 @@ def main(conf: omegaconf.OmegaConf=conf):
         shuffle=False, 
         drop_last=True
     )
-    test_sampler = DistributedSampler(
-        dataset=test_ds, 
-        rank=conf.local_rank, 
-        shuffle=False, 
-        drop_last=False
-    )
+    # test_sampler = DistributedSampler(
+    #     dataset=test_ds, 
+    #     rank=conf.local_rank, 
+    #     shuffle=False, 
+    #     drop_last=False
+    # )
     
     # Create DataLoaders
     train_loader = DataLoader(
@@ -175,12 +175,12 @@ def main(conf: omegaconf.OmegaConf=conf):
         sampler=val_sampler,
         drop_last=True
     )
-    test_loader = DataLoader(
-        dataset=test_ds, 
-        batch_size=conf.batch_size.labeled, 
-        shuffle=False,
-        sampler=test_sampler
-    )
+    # test_loader = DataLoader(
+    #     dataset=test_ds, 
+    #     batch_size=conf.batch_size.labeled, 
+    #     shuffle=False,
+    #     sampler=test_sampler
+    # )
 
     # Optimizer
     optim_config = OptimConfig(conf=conf, model=model)

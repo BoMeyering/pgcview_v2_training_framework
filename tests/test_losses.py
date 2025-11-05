@@ -51,8 +51,9 @@ class TestGetLossCriterion(unittest.TestCase):
             {
                 "loss": {
                     "name": LossCriterion.CELOSS,
-                    "reduction": "mean",
-                }
+                    "reduction": "mean"
+                },
+                "device": "cpu"
             }
         )
         loss_fn = get_loss_criterion(conf=conf)
@@ -66,8 +67,9 @@ class TestGetLossCriterion(unittest.TestCase):
             {
                 "loss": {
                     "name": LossCriterion.FOCALLOSS,
-                    "reduction": "mean",
-                }
+                    "reduction": "mean"
+                },
+                "device": "cpu"
             }
         )
         loss_fn = get_loss_criterion(conf=conf)
@@ -84,7 +86,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "reduction": "mean",
                     "use_weights": "True",
                     "weights": np.random.randn(N_CLASSES).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
         loss_fn = get_loss_criterion(conf=conf)
@@ -101,7 +104,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "reduction": "mean",
                     "use_weights": True,
                     "weights": np.random.randn(N_CLASSES).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
         loss_fn = get_loss_criterion(conf=conf)
@@ -118,7 +122,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "reduction": "mean",
                     "loss_type": "CELOSS",
                     "samples": np.random.randint(100, 200, (N_CLASSES)).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
 
@@ -137,7 +142,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "loss_type": "FOCALLOSS",
                     "gamma": 2.0,
                     "samples": np.random.randint(100, 200, (N_CLASSES)).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
 
@@ -155,7 +161,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "reduction": "mean",
                     "loss_type": "CELOSS",
                     "samples": np.random.randint(100, 200, (N_CLASSES)).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
 
@@ -174,7 +181,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "loss_type": "FOCALLOSS",
                     "gamma": 2.0,
                     "samples": np.random.randint(100, 200, (N_CLASSES)).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
 
@@ -192,7 +200,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "reduction": "mean",
                     "loss_type": "CELOSS",
                     "samples": np.random.randint(100, 200, (N_CLASSES)).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
 
@@ -211,7 +220,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "loss_type": "FOCALLOSS",
                     "gamma": 2.0,
                     "samples": np.random.randint(100, 200, (N_CLASSES)).tolist()
-                }
+                },
+                "device": "cpu"
             }
         )
 
@@ -228,7 +238,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "name": LossCriterion.DICELOSS,
                     "reduction": "mean",
                     "smooth": 1.0
-                }
+                },
+                "device": "cpu"
             }
         )
 
@@ -247,7 +258,8 @@ class TestGetLossCriterion(unittest.TestCase):
                     "beta": 0.6,
                     "weights": 0.4,
                     "smooth": 1.0
-                }
+                },
+                "device": "cpu"
             }
         )
 

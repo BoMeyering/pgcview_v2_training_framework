@@ -1,0 +1,22 @@
+#!bin/bash
+
+configs=(
+    "configs/loss_experiment/segformer_enb1_celoss.yaml"
+    "configs/loss_experiment/segformer_enb1_focalloss.yaml"
+    "configs/loss_experiment/segformer_enb1_weighted_celoss.yaml"
+    "configs/loss_experiment/segformer_enb1_weighted_focalloss.yaml"
+    "configs/loss_experiment/segformer_enb1_cbceloss.yaml"
+    "configs/loss_experiment/segformer_enb1_cbfocalloss.yaml"
+    "configs/loss_experiment/segformer_enb1_acbceloss.yaml"
+    "configs/loss_experiment/segformer_enb1_acbfocalloss.yaml"
+    "configs/loss_experiment/segformer_enb1_recallceloss.yaml"
+    "configs/loss_experiment/segformer_enb1_recallfocalloss.yaml"
+    "configs/loss_experiment/segformer_enb1_diceloss.yaml"
+    "configs/loss_experiment/segformer_enb1_tverskyloss.yaml"    
+)
+
+for cfg in "${configs[@]}"; do
+    torchrun --standalone --nproc-per-node=2 train_supervised.py --config "$cfg" --backend nccl
+done
+
+exit 0
