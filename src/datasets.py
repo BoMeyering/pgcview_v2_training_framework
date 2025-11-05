@@ -192,6 +192,7 @@ class LabeledDataset(Dataset):
         self.img_keys = sorted(
             [img for img in glob("*", root_dir=self.img_dir) if img.lower().endswith(("png", "jpg", "jpeg"))]
         )
+        
         self.target_keys = sorted(
             [t for t in glob("*", root_dir=self.target_dir) if t.lower().endswith(("png"))]
         )

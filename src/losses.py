@@ -100,10 +100,10 @@ def get_loss_criterion(conf: OmegaConf) -> torch.nn.Module:
         filtered_params['loss_type'] = LossCriterion.__members__.get(filtered_params['loss_type']).value
     # Convert samples to a torch tensor if it exists
     if 'samples' in filtered_params:
-        filtered_params['samples'] = torch.tensor(filtered_params['samples'], dtype=torch.float32)
+        filtered_params['samples'] = torch.tensor(filtered_params['samples'], dtype=torch.float32).to(conf.device)
     # Convert weights to a torch tensor if it exists
     if 'weights' in filtered_params:
-        filtered_params['weights'] = torch.tensor(filtered_params['weights'], dtype=torch.float32)
+        filtered_params['weights'] = torch.tensor(filtered_params['weights'], dtype=torch.float32).to(conf.device)
 
     # Instnatiate the criterion
     criterion = LossClass(**filtered_params)
@@ -324,11 +324,11 @@ class CBLoss(torch.nn.Module):
             ValueError: If loss_type is not one of ['CELoss', 'FocalLoss'].
         """
         super().__init__()
-        self.samples = samples
+        self.samples = samples.to(dtype=torch.float64)
         self.loss_type = loss_type
         self.reduction = reduction
         self.gamma = gamma
-        self.N = self.samples.sum()
+        self.N = self.samples.sum().to(dtype=torch.float64)
         self.beta = (self.N - 1) / self.N
         self.C = len(self.samples)
         self.eps = 1e-7
@@ -348,12 +348,24 @@ class CBLoss(torch.nn.Module):
         Effective samples E_n = (1 - beta^n) / (1 - beta)
         Weights weights_n = C / (E_n * sum(1/E_n)) such that sum(weights_n) = C
         """
+
         # Calculate effective samples
-        E = (1 - torch.pow(self.beta, self.samples)).double() / (1 - self.beta + self.eps).double()
+        E = self.N * (1.0 - torch.exp(-self.samples / self.N))
+        E = torch.clamp(E, min=1e-12)
+
+        # E = (1 - torch.pow(self.beta, self.samples)).double() / (1 - self.beta + self.eps).double()
 
         # Invert to get weights weights and normalize to sum to C
-        self.weights = ((1/E) / (1/E).sum() * self.C).float()
+        invE = 1.0 / E
+        invE_sum = invE.sum()
 
+        weights = (invE / invE_sum) * float(self.C)
+        self.weights = weights.to(dtype=torch.float32, device=self.samples.device)
+
+        if not torch.isfinite(self.weights).all():
+            raise ValueError(
+                "Non-finite class balanced weights computed. Check implementation in src.losses.CBLoss"
+            )
      
     def forward(self, preds: torch.tensor, targets: torch.tensor, mask: Optional[torch.BoolTensor] = None) -> torch.tensor:
         """Forward method of CBLoss.
