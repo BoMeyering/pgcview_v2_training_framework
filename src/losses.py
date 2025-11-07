@@ -61,12 +61,16 @@ def read_class_counts(filepath: Union[str, Path]=Path('metadata/class_sample_cou
         with open(filepath, 'r') as f:
             count_dict = json.load(f)
             samples = [val['pixel_count'] for key, val, in count_dict.items()]
-            inv_weights = [1/(x/sum(samples)) for x in samples]
 
-            return samples, inv_weights
+            # Invert and balance weights
+            inv_w = [1 / x for x in samples]
+            inv_w_mean = sum(samples) / len(samples)
+            C_inv_w = [w / inv_w_mean for w in inv_w] # Reweight such that the mean of the inverse weights is equal 1
+
+            return samples, C_inv_w
         
     except JSONDecodeError as e:
-        rank_log(IS_MAIN, logger.error, f"Error decoding JSON file. Error: {e}")
+        logger.error(f"Error decoding JSON file. Error: {e}")
 
         return None, None
 
