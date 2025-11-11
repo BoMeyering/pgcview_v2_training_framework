@@ -9,7 +9,6 @@ import src
 import json
 import logging
 import inspect
-import argparse
 import torch.nn.functional as F
 from json.decoder import JSONDecodeError
 from pathlib import Path
@@ -632,8 +631,7 @@ class DiceLoss(torch.nn.Module):
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
                 A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
-            return_stats : bool
-                A boolean flag whether to return the intersection and union stats
+
         Returns:
         --------
             loss :  torch.Tensor
@@ -740,3 +738,95 @@ class TverskyLoss(torch.nn.Module):
             return loss.sum()
         else:
             return loss
+
+class TvmfDiceLoss(torch.nn.Module):
+    """
+    Implementation of t-vMF Dice Loss
+    https://www.sciencedirect.com/science/article/pii/S0010482523011605#fig1
+    """
+    def __init__(
+            self, 
+            kappa: Optional[float]=0,
+            smooth: float = 1.0, 
+            reduction: str = 'mean',
+            eps: float = 1.e-8,
+            exclude_empty_target: bool=True
+        ):
+        """Instantiate a TvmfDiceLoss object.
+
+        Parameters:
+        -----------
+            k : float, optional
+                Weights the denominator of the t-vMF loss
+            smooth : float, optional
+                A smoothing factor to avoid division by zero. Defaults to 1.0.
+            reduction : str, optional
+                The reduction method to use. Must be one of ['mean', 'sum', 'none']. Defaults to 'mean'.
+            eps : float
+                The machine eps to use to avoid DivisionByZeroError.
+        """
+        super().__init__()
+        self.kappa = kappa
+        self.smooth = smooth
+        self.reduction = reduction
+        self.eps = eps
+        self.exclude_empty_target = bool(exclude_empty_target)
+
+    def _flatten_per_class(self, X: torch.Tensor) -> torch.Tensor:
+        X = X.permute(1, 0, *range(2, X.ndim)).contiguous()
+
+        return X.reshape(X.shape[0], -1)
+    
+    def forward(self, preds: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
+        """Forward method of TvmfDiceLoss.
+
+        Parameters:
+        -----------
+            preds : torch.Tensor
+                The raw logits from the model of shape (N, C, H, W).
+            targets : torch.Tensor
+                The ground truth targets of shape (N, H, W).
+            mask : torch.BoolTensor, optional
+                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+
+        Returns:
+        --------
+            loss :  torch.Tensor
+                A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (C,).
+        """
+        # 
+        probs = torch.softmax(preds, dim=1)
+        C = probs.shape[1]
+        targets_oh = F.one_hot(targets, num_classes=C).movedim(-1, 1).float()
+        
+        if mask is not None:
+            mask = mask.unsqueeze(1)
+            preds = preds * mask
+            targets_oh = targets_oh * mask
+
+        # Flatten and normalize vectors for cosine similarity
+        A = self._flatten_per_class(probs) # Tensor of shape (C, N*H*W)
+        B = self._flatten_per_class(targets_oh)
+
+        A = A / (A.norm(dim=1, keepdim=True) + self.eps)
+        B = B / (B.norm(dim=1, keepdim=True) + self.eps)
+
+        cos_theta = (A * B).sum(dim=1) # Sum over N*H*W vector per class -> tensor of shape (C,)
+        cos_theta = cos_theta.clamp(-1.0 + self.eps, 1.0 + self.eps)
+
+        phi_t = (1.0 + cos_theta) / (1.0 + self.kappa*(1.0 - cos_theta)) - 1.0
+
+        class_loss = (1.0 - phi_t) ** 2
+
+        if self.exclude_empty_target:
+            idx = B.norm(dim=1) > 0
+            if idx.any():
+                class_loss = class_loss[idx]
+
+        if self.reduction == 'mean':
+            return torch.mean(class_loss)
+        elif self.reduction == 'sum':
+            return torch.sum(class_loss)
+        else:
+            return class_loss
+        
