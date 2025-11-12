@@ -42,6 +42,7 @@ class LossCriterion(Enum):
     RECALLLOSS = 'RecallLoss'
     DICELOSS = 'DiceLoss'
     TVERSKYLOSS = 'TverskyLoss'
+    TVMFDICELOSS = 'TvmfDiceLoss'
 
 @dataclass
 class Images:
@@ -72,8 +73,13 @@ class Loss:
     use_weights: bool=False
     reduction: str='mean'
     loss_type: str='CELOSS'
-    gamma: float=2.0
+    gamma: float=1.0
     smooth: float=1.0
+    alpha: float=0.5
+    beta: float=0.5
+    focal_gamma: float=1.0
+    kappa: float=0.0
+    exclude_empty_target: bool=True
 
 @dataclass
 class BatchSize:

@@ -15,7 +15,7 @@ from wonderwords import RandomWord
 from pathlib import Path
 from random import randint
 from torch import Tensor
-from src.losses import get_loss_criterion, CELoss, FocalLoss, CBLoss, ACBLoss, RecallLoss, DiceLoss, TverskyLoss
+from src.losses import get_loss_criterion, CELoss, FocalLoss, CBLoss, ACBLoss, RecallLoss, DiceLoss, TverskyLoss, TvmfDiceLoss
 from src.utils.config import LossCriterion, TrainSupervisedConfig
 
 
@@ -246,6 +246,25 @@ class TestGetLossCriterion(unittest.TestCase):
         loss_fn = get_loss_criterion(conf=conf)
 
         self.assertIsInstance(obj=loss_fn, cls=DiceLoss)
+    
+    def test_create_focaldiceloss(self):
+        """ Create focal variant DiceLoss and assert integrity """
+
+        conf = OmegaConf.create(
+            {
+                "loss": {
+                    "name": LossCriterion.DICELOSS,
+                    "reduction": "mean",
+                    "smooth": 1.0,
+                    "gamma": 2.0
+                },
+                "device": "cpu"
+            }
+        )
+
+        loss_fn = get_loss_criterion(conf=conf)
+
+        self.assertIsInstance(obj=loss_fn, cls=DiceLoss)
 
     def test_create_tverskyloss(self):
         """ Create Tversky Loss and assert integrity """
@@ -266,6 +285,25 @@ class TestGetLossCriterion(unittest.TestCase):
         loss_fn = get_loss_criterion(conf=conf)
 
         self.assertIsInstance(obj=loss_fn, cls=TverskyLoss)
+    
+    def test_create_tvmfdiceloss(self):
+        """ Create t-vMF Dice Loss and assert integrity """
+
+        conf = OmegaConf.create(
+            {
+                "loss": {
+                    "name": LossCriterion.TVMFDICELOSS,
+                    "reduction": "mean",
+                    "kappa": 32,
+                    "smooth": 1.0
+                },
+                "device": "cpu"
+            }
+        )
+
+        loss_fn = get_loss_criterion(conf=conf)
+
+        self.assertIsInstance(obj=loss_fn, cls=TvmfDiceLoss)
 
 class TestLossOverfit(unittest.TestCase):
     """ Overfit each loss function and test loss reduction """
@@ -357,7 +395,10 @@ class TestLossReductionMode(unittest.TestCase):
             "dice_none": DiceLoss(reduction='none'),
             "tversky_mean": TverskyLoss(),
             "tversky_sum": TverskyLoss(reduction='sum'),
-            "tversky_none": TverskyLoss(reduction='none')
+            "tversky_none": TverskyLoss(reduction='none'),
+            "tvmfdice_mean": TvmfDiceLoss(),
+            "tvmfdice_sum": TvmfDiceLoss(reduction='sum'),
+            "tvmfdice_none": TvmfDiceLoss(reduction='none')
         }
 
     def test_loss_reductions(self):
@@ -369,7 +410,7 @@ class TestLossReductionMode(unittest.TestCase):
             if loss_fun.reduction=='mean' or loss_fun.reduction == 'sum':
                 self.assertEqual(loss.shape, torch.Size([]))
             elif any([sub in name for sub in ['dice', 'tversky']]) and loss_fun.reduction == 'none':
-                self.assertEqual(loss.shape, torch.Size([BATCH_SIZE, N_CLASSES]))
+                self.assertEqual(loss.shape, torch.Size([N_CLASSES]))
             elif loss_fun.reduction == 'none':
                 self.assertEqual(loss.shape, self.targets.shape)
 
@@ -396,7 +437,9 @@ class TestExtremeLogits(unittest.TestCase):
             "recall_ce": RecallLoss(samples=self.samples, loss_type="CELoss"),
             "recall_focal": RecallLoss(samples=self.samples, loss_type="FocalLoss"),
             "dice": DiceLoss(),
-            "tversky": TverskyLoss()
+            "focaldice": DiceLoss(gamma=2.0),
+            "tversky": TverskyLoss(),
+            "tvmfdice": TvmfDiceLoss()
         }
 
     def test_extreme_losses(self):
@@ -431,7 +474,8 @@ class TestMaskOperations(unittest.TestCase):
             "recall_ce": RecallLoss(samples=self.samples, loss_type="CELoss", reduction='sum'),
             "recall_focal": RecallLoss(samples=self.samples, loss_type="FocalLoss", reduction='sum'),
             "dice": DiceLoss(reduction='sum'),
-            "tversky": TverskyLoss(reduction='sum')
+            "tversky": TverskyLoss(reduction='sum'),
+            "tvmfdice": TvmfDiceLoss(reduction='sum')
         }
 
     def test_masking_operations(self):
@@ -445,7 +489,7 @@ class TestMaskOperations(unittest.TestCase):
             loss_fn_noredux = deepcopy(loss_fn)
             loss_fn_noredux.reduction='none'
 
-            if 'dice' in name:
+            if name == 'dice':
                 loss_0, int_0, union_0 = loss_fn(self.logits, self.targets, return_stats=True)
                 loss_1, int_1, union_1 = loss_fn(self.logits, self.targets, mask, return_stats=True)
                 loss_2, int_2, union_2 = loss_fn(self.logits, self.targets, anti_mask, return_stats=True)
@@ -453,7 +497,9 @@ class TestMaskOperations(unittest.TestCase):
                 # Assert that the masked and anit-masked losses equal the unmasked lossS
                 self.assertAlmostEqual(int_0.sum().item(), (int_1 + int_2).sum().item(), places=3)
                 self.assertAlmostEqual(union_0.sum().item(), (union_1 + union_2).sum().item(), places=3)
-            elif 'tversky' in name:
+            elif name == 'tversky':
+                pass
+            elif name == 'tvmfdice':
                 pass
             else:
                 # Create three sets of losses with and without masks

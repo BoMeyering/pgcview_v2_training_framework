@@ -49,7 +49,7 @@ optimizer:
   ema: True
   ema_decay: 0.9
   optimizer_params: 
-    lr: 0.003
+    lr: 0.005
     momentum: 0.9
     nesterov: True
     gamma: 0.99
@@ -65,6 +65,9 @@ loss:
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   use_weights: false
+  alpha: .5
+  beta: .5
+  smooth: 0.0000001
   # loss_type: CELOSS
 
 # Batch Sizes

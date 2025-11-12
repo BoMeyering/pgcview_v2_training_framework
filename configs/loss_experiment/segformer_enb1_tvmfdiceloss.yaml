@@ -1,8 +1,8 @@
 # Training configs
-model_run: loss_exp_segformer_enb1_diceloss
+model_run: loss_exp_segformer_enb1_tvmfdiceloss
 
 # Computation Device
-device: cuda
+device: cpu
 
 # Images
 images:
@@ -61,11 +61,11 @@ scheduler:
 
 # Criterion / Loss Function
 loss:
-  name: DICELOSS
+  name: TVMFDICELOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   use_weights: false
-  gamma: 1.0
+  kappa: 32
   # loss_type: CELOSS
 
 # Batch Sizes
