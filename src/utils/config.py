@@ -73,7 +73,7 @@ class Loss:
     use_weights: bool=False
     reduction: str='mean'
     loss_type: str='CELOSS'
-    gamma: float=2.0
+    gamma: float=1.0
     smooth: float=1.0
     alpha: float=0.5
     beta: float=0.5

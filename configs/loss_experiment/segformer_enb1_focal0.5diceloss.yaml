@@ -65,7 +65,7 @@ loss:
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   use_weights: false
-  focal_gamma: 0.5
+  gamma: 0.5
   # loss_type: CELOSS
 
 # Batch Sizes
