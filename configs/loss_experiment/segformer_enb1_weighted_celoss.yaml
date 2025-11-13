@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 100
+  epochs: 5
   sanity_check: True
 
 # Model Architecture
@@ -65,7 +65,6 @@ loss:
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   use_weights: true
-  loss_type: CELOSS
 
 # Batch Sizes
 batch_size:

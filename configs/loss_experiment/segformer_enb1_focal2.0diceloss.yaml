@@ -1,5 +1,5 @@
 # Training configs
-model_run: loss_exp_segformer_enb1_focal0.5diceloss
+model_run: loss_exp_segformer_enb1_focal2.0diceloss
 
 # Computation Device
 device: cuda
@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 100
+  epochs: 5
   sanity_check: True
 
 # Model Architecture
@@ -65,8 +65,8 @@ loss:
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   use_weights: false
-  gamma: 0.5
-  # loss_type: CELOSS
+  gamma: 2.0
+  smooth: 1e-6
 
 # Batch Sizes
 batch_size:

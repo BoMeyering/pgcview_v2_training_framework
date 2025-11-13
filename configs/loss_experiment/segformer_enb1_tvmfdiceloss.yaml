@@ -2,7 +2,7 @@
 model_run: loss_exp_segformer_enb1_tvmfdiceloss
 
 # Computation Device
-device: cpu
+device: cuda
 
 # Images
 images:
@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 100
+  epochs: 5
   sanity_check: True
 
 # Model Architecture
@@ -66,7 +66,6 @@ loss:
   reduction: mean
   use_weights: false
   kappa: 32
-  # loss_type: CELOSS
 
 # Batch Sizes
 batch_size:
