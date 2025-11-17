@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 100
+  epochs: 5
   sanity_check: True
 
 # Model Architecture

@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 100
+  epochs: 5
   sanity_check: True
 
 # Model Architecture
@@ -67,8 +67,7 @@ loss:
   use_weights: false
   alpha: .5
   beta: .5
-  smooth: 0.0000001
-  # loss_type: CELOSS
+  smooth: 1e-6
 
 # Batch Sizes
 batch_size:

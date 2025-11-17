@@ -9,10 +9,11 @@ import src
 import json
 import logging
 import inspect
+import numpy as np
 import torch.nn.functional as F
 from json.decoder import JSONDecodeError
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union, Optional,Tuple, Any
 from omegaconf import OmegaConf
 from src.utils.config import LossCriterion
 from src.utils.loggers import rank_log
@@ -20,22 +21,23 @@ from src.distributed import is_main_process
 
 logger = logging.getLogger()
 
-def read_class_counts(filepath: Union[str, Path]=Path('metadata/class_sample_counts.json')):
+def read_class_counts(filepath: Union[str, Path]=Path('metadata/class_sample_counts.json'), tau: float=0.25) -> Tuple[Any]:
     """Read in a class count JSON file
 
-    Load the calculated class pixel counts and return a list of sample counts as well as inverse weights
+    Load the calculated class pixel counts and return a list of sample counts as well as normalized, inverse frequency count weights
 
     Parameters:
     -----------
         filepath : Union[str, Path]
             The path to the sample counts JSON file. Defaults to 'metadata/class_sample_counts.json'
+        tau : Power to modulate the weights by. Defaults to 0.25
     
     Returns:
     --------
         samples : list
             The list of sample pixel counts ordered by class index
-        inv_weights : list
-            The list of inverse class weights ordered by class index
+        weights : list
+            The list of normalized, modulated, inverse class weights ordered by class index
     """
     # Check type
     if not isinstance(filepath, (str, Path)):
@@ -61,11 +63,13 @@ def read_class_counts(filepath: Union[str, Path]=Path('metadata/class_sample_cou
             samples = [val['pixel_count'] for key, val, in count_dict.items()]
 
             # Invert and balance weights
-            inv_w = [1 / x for x in samples]
-            inv_w_mean = sum(samples) / len(samples)
-            C_inv_w = [w / inv_w_mean for w in inv_w] # Reweight such that the mean of the inverse weights is equal 1
+            # Raise inverse weights to power of tau
+            # Center them so that mean(norm_w) = 1 and clip within ratio limits
+            inv_w = 1 / np.array([x for x in samples])
+            tau_w = inv_w.clip(min=1e-12)**tau # Raise weights to tau_th power
+            norm_w = (tau_w / tau_w.mean()).clip(min=1/5, max=5.0).tolist()
 
-            return samples, C_inv_w
+            return samples, norm_w
         
     except JSONDecodeError as e:
         logger.error(f"Error decoding JSON file. Error: {e}")
@@ -93,11 +97,11 @@ def get_loss_criterion(conf: OmegaConf) -> torch.nn.Module:
 
     # Get the loss parameters from the config
     loss_params = conf.loss
-    # Ge the valid parameters for the loss class and filter the config params
+    # Get the valid parameters for the loss class and filter the config params
     valid_params = inspect.signature(LossClass).parameters
     filtered_params = {k: v for k, v in loss_params.items() if k in valid_params}
 
-    # Reset the loss_type parameter to the Enum name if it exists
+    # Set the loss_type parameter to the Enum name if it exists
     if 'loss_type' in filtered_params:
         filtered_params['loss_type'] = LossCriterion.__members__.get(filtered_params['loss_type']).value
     # Convert samples to a torch tensor if it exists
@@ -107,7 +111,7 @@ def get_loss_criterion(conf: OmegaConf) -> torch.nn.Module:
     if 'weights' in filtered_params:
         filtered_params['weights'] = torch.tensor(filtered_params['weights'], dtype=torch.float32).to(conf.device)
 
-    # Instnatiate the criterion
+    # Instantiate the criterion
     criterion = LossClass(**filtered_params)
     
     return criterion
@@ -196,6 +200,7 @@ class CELoss(torch.nn.Module):
         # Apply mask if provided
         if mask is not None:
             targets = self._mask_targets(targets, mask, self.ignore_index)
+        
         # Compute the loss
         if self.use_weights:
             loss = F.cross_entropy(
@@ -224,17 +229,18 @@ class FocalLoss(torch.nn.Module):
     """
     def __init__(
             self, 
-            weights: Optional[Union[float, torch.Tensor]]=None, 
-            gamma: float=2, 
+            weights: Optional[torch.Tensor]=None, 
+            gamma: float=2.0, 
             reduction: str='mean',
-            eps: float=1e-8
+            eps: float=1e-8,
+            use_weights: bool=False
         ):
         """Instantiate a FocalLoss object.
 
         Parameters:
         -----------
-            weights : float or torch.Tensor, optional
-                Weights of shape (C,) where C is the number of classes, or a single float for uniform weighting. Defaults to 1.
+            weights : torch.Tensor, optional
+                Weights of shape (C,) where C is the number of classes. Defaults to None.
             gamma : float, optional
                 Focusing parameter for modulating factor (1-p). Defaults to 2.
             reduction : str, optional
@@ -247,6 +253,7 @@ class FocalLoss(torch.nn.Module):
         self.weights = weights
         self.gamma = gamma
         self.eps = eps
+        self.use_weights = use_weights
         
         # Validate reduction
         if reduction not in ['mean', 'sum', 'none']:
@@ -271,21 +278,20 @@ class FocalLoss(torch.nn.Module):
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
         if isinstance(self.weights, torch.Tensor) and len(self.weights) != logits.shape[1]:
-            raise ValueError(f"Length of weights should be 1 or the number of classes in logits, {logits.shape[1]}. Please set new weights.")
-        
-        # if not 
+            raise ValueError(f"Length of weights should be the number of classes in logits, {logits.shape[1]}. Please check the weights.")
+
         # Calculate cross entropy with no reduction
-        ce = F.cross_entropy(
-            logits,
-            targets,
-            weight=self.weights, 
-            reduction='none'
-        )
+        log_probs = F.log_softmax(logits, dim=1)
+        log_pt = log_probs.gather(1, targets.unsqueeze(1)).squeeze(1) # Gather the probabilities using the targets as an index
+        pt = torch.exp(log_pt).clamp(self.eps, 1-self.eps)
 
-        # Calculate pt 
-        pt = torch.exp(-ce).clamp(self.eps, 1.0 - self.eps)
+        if self.use_weights and self.weights is not None:
+            alpha_t = self.weights[targets]
+        else:
+            alpha_t = 1.0
 
-        loss = ((1.0 - pt) ** self.gamma) * ce
+        # Weighted focal loss
+        loss = -alpha_t * (1.0 - pt).pow(self.gamma) * log_pt 
 
         # Mask the loss if mask is provided
         if mask is not None:
@@ -299,7 +305,7 @@ class FocalLoss(torch.nn.Module):
                 return loss.sum()
             else:
                 return loss
-
+        
         # Apply reductions
         if self.reduction == 'mean':
             return loss.mean()
@@ -371,9 +377,8 @@ class CBLoss(torch.nn.Module):
 
         # Invert to get weights weights and normalize to sum to C
         invE = 1.0 / E
-        invE_sum = invE.sum()
+        weights = invE / invE.mean()
 
-        weights = (invE / invE_sum) * float(self.C)
         self.weights = weights.to(dtype=torch.float32, device=self.samples.device)
 
         if not torch.isfinite(self.weights).all():
@@ -387,9 +392,9 @@ class CBLoss(torch.nn.Module):
         Parameters:
         -----------
             logits : torch.Tensor
-                The raw logits from the model.
+                The raw logits from the model of shape (N, C, H, W).
             targets : torch.Tensor
-                The ground truth targets.
+                The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
                 A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
 
@@ -440,9 +445,9 @@ class ACBLoss(torch.nn.Module):
         self.N = self.samples.sum()
         self.N_max = torch.max(self.samples)
         self.C = len(self.samples)
-        self.eps = 1e-7
+        self.eps = 1e-8
 
-        self._effective_samples()
+        self._set_effective_samples()
         if self.loss_type == 'CELoss':
             self.loss_fn = CELoss(weights=self.weights.float(), reduction=self.reduction)
         elif self.loss_type == 'FocalLoss':
@@ -450,7 +455,7 @@ class ACBLoss(torch.nn.Module):
         else:
             raise ValueError(f"Invalid loss type: {self.loss_type}. Must be one of ['CELoss', 'FocalLoss']")
 
-    def _effective_samples(self):
+    def _set_effective_samples(self):
         """Helper function to calculate the effective samples and weights based on beta.
 
         Beta = F(f(u, v, b)) = tanh(u / (v * sqrt(b)))
@@ -471,7 +476,8 @@ class ACBLoss(torch.nn.Module):
         E = (1 - torch.pow(self.beta, self.samples)).double() / (1 - self.beta + self.eps).double()
 
         # Invert to get weights weights and normalize
-        weights = 1/E * self.C / (1/E).sum()
+        invE = 1.0 / E
+        weights = invE / invE.mean()
 
         self.E = E
         self.weights = weights
@@ -480,13 +486,32 @@ class ACBLoss(torch.nn.Module):
         """
         Forward method of ACBLoss.
 
-        Args:
-            logits (torch.Tensor): The raw logits from the model.
-            targets (torch.Tensor): The ground truth targets.
-            mask (Optional[torch.BoolTensor], optional): A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+        Parameters:
+        -----------
+            logits : torch.Tensor
+                The raw logits from the model of shape (N, C, H, W).
+            targets : torch.Tensor
+                The ground truth targets of shape (N, H, W).
+            mask : torch.BoolTensor, optional
+                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+
 
         Returns:
             torch.Tensor: A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
+
+        Parameters:
+        -----------
+            logits : torch.Tensor
+                The raw logits from the model.
+            targets : torch.Tensor
+                The ground truth targets.
+            mask : torch.BoolTensor, optional
+                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+
+        Returns:
+        --------
+            loss : torch.Tensor
+                A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
         
         loss = self.loss_fn(logits=logits, targets=targets, mask=mask)
@@ -504,7 +529,7 @@ class RecallLoss(torch.nn.Module):
             loss_type: str, 
             reduction: str='mean', 
             gamma: Optional[float]=2.0, 
-            eps: float=0.0000001
+            eps: float=1e-8
         ):
         """Instantiate a RecallLoss object.
 
@@ -519,7 +544,7 @@ class RecallLoss(torch.nn.Module):
             gamma : float, optional
                 The gamma value to use for Focal Loss. Only used if loss_type is 'FocalLoss'. Defaults to 2.0.
             eps : float, optional
-                A small value to avoid division by zero. Defaults to 0.0000001.
+                A small value to avoid division by zero. Defaults to 1e-8.
         """
         super().__init__()
         self.samples = samples
@@ -571,7 +596,8 @@ class RecallLoss(torch.nn.Module):
             weights = torch.full_like(weights, 1.)
 
         # Normalize weights to sum to C
-        self.weights = (weights / weights.sum() * self.C).float()
+        self.weights = weights / weights.mean()
+        # Update the loss_fn with the new weights
         self.loss_fn.weights = self.weights
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
@@ -685,7 +711,6 @@ class DiceLoss(torch.nn.Module):
             else:
                 return loss
 
-
 class TverskyLoss(torch.nn.Module):
     """
     Implementation of Tversky Loss
@@ -768,13 +793,13 @@ class TvmfDiceLoss(torch.nn.Module):
     https://www.sciencedirect.com/science/article/pii/S0010482523011605#fig1
     """
     def __init__(
-            self, 
-            kappa: Optional[float]=0,
-            smooth: float = 1.0, 
-            reduction: str = 'mean',
-            eps: float = 1.e-8,
-            exclude_empty_target: bool=True
-        ):
+        self, 
+        kappa: Optional[float]=0,
+        smooth: float = 1.0, 
+        reduction: str = 'mean',
+        eps: float = 1.e-8,
+        exclude_empty_target: bool=True
+    ):
         """Instantiate a TvmfDiceLoss object.
 
         Parameters:
@@ -817,7 +842,7 @@ class TvmfDiceLoss(torch.nn.Module):
             loss :  torch.Tensor
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (C,).
         """
-        # 
+        # Calculate probabilities and targets
         probs = torch.softmax(logits, dim=1)
         C = probs.shape[1]
         targets_oh = F.one_hot(targets, num_classes=C).movedim(-1, 1).float()
@@ -834,8 +859,9 @@ class TvmfDiceLoss(torch.nn.Module):
         A = A / (A.norm(dim=1, keepdim=True) + self.eps)
         B = B / (B.norm(dim=1, keepdim=True) + self.eps)
 
+        # Calculate cosine similarity between the vectors and clamp
         cos_theta = (A * B).sum(dim=1) # Sum over N*H*W vector per class -> tensor of shape (C,)
-        cos_theta = cos_theta.clamp(-1.0 + self.eps, 1.0 + self.eps)
+        cos_theta = cos_theta.clamp(-1.0 + self.eps, 1.0 - self.eps)
 
         phi_t = (1.0 + cos_theta) / (1.0 + self.kappa*(1.0 - cos_theta)) - 1.0
 
