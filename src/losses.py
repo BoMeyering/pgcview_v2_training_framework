@@ -5,6 +5,7 @@ BoMeyering 2025
 """
 
 import torch
+import numbers
 import src
 import json
 import logging
@@ -121,64 +122,47 @@ class CELoss(torch.nn.Module):
     Wrapper class for vanilla cross entropy loss.
     """
     def __init__(
-            self, 
-            ignore_index=-1, 
+            self,
             smooth: float=0.0, 
             weights: Optional[torch.Tensor]=None, 
-            reduction: str='mean', 
-            use_weights: bool=True
+            reduction: str='mean'
         ):
         """Instantiate a CELoss object.
 
         Parameters:
         -----------
-            ignore_index : int, optional
-                Index to ignore in the target, by default -1
             smooth : float, optional
                 A float in the range [0.0, 1.0]. Specifies the amount of smoothing to apply to the labels, by default 0.0
             weights : torch.Tensor, optional
-                A 1D tensor of shape (C,) where C is the number of classes. Each value is the weight for that class, by default None
+                A 1D tensor of shape (C,) where C is the number of classes. Each value is the weight for that class, by default None.
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum', 'none']. Defaults to 'mean'.
-            use_weights : bool, optional
-                Whether to use the provided weights or not. Defaults to True.
         """
         super().__init__()
-        self.ignore_index = ignore_index
-        self.smooth = smooth
-        self.weights = weights
         
-        # Validate reduction
+        # Validate arguments
+        if not isinstance(smooth, float) or not (0.0 <= smooth <= 1.0):
+            raise ValueError(
+                "'smooth' must be a float in the range [0.0, 1.0]; got {smooth} instead."
+            )
+        self.smooth = smooth
+
+        if not isinstance(weights, (torch.Tensor, type(None))):
+            raise ValueError(
+                f"'weights' must be a torch.Tensor or None; got {type(weights)} instead."
+            )
+        self.weights = weights
+
         if reduction not in ['mean', 'sum', 'none']:
             raise ValueError(f"Invalid reduction mode: {reduction}. Must be one of ['mean', 'sum', 'none']")
         self.reduction = reduction
 
-        self.use_weights = use_weights
-    
-    def _mask_targets(self, targets: torch.Tensor, mask: torch.BoolTensor, ignore_index: int=-1) -> torch.Tensor:
-        """
-        Helper function to create a new target with the ignore_index at the masked locations.
-
-        Parameters:
-        -----------
-            targets : torch.Tensor
-                A torch.Tensor of shape (N, H, W) and dtype int.
-            mask : torch.BoolTensor
-                A boolean torch tensor of shape (N, H, W).
-            ignore_index (int, optional): Index value to used for the masked values. Defaults to -1.
-
-        Returns:
-        --------
-            adj_targets : torch.Tensor
-                A tensor with the masked target values replaced by the ignore index.
-        """
-
-        # Create a new target tensor with ignore_index at the masked locations
-        adj_targets = torch.where(mask, targets, torch.full_like(targets, ignore_index)).to(targets.device)
-
-        return adj_targets
-
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
+    def forward(
+        self, 
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        mask: Optional[torch.BoolTensor] = None
+    ) -> torch.Tensor:
         """
         Forward method of CELoss.
 
@@ -189,37 +173,33 @@ class CELoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
             loss : torch.Tensor
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
+        if isinstance(self.weights, torch.Tensor) and len(self.weights) != logits.shape[1]:
+            raise ValueError(
+                f"Length of weights should be the number of classes in logits, {logits.shape[1]}. Please check the weights or the logits passed."
+            )
+        # Clone so we don’t modify caller’s tensor
+        tgt = targets.clone()
 
-        # Apply mask if provided
         if mask is not None:
-            targets = self._mask_targets(targets, mask, self.ignore_index)
-        
-        # Compute the loss
-        if self.use_weights:
-            loss = F.cross_entropy(
-                input=logits, 
-                target=targets, 
-                ignore_index=self.ignore_index, 
-                label_smoothing=self.smooth, 
-                reduction=self.reduction, 
-                weight=self.weights
-            )
-        else:
-            loss = F.cross_entropy(
-                input=logits, 
-                target=targets, 
-                ignore_index=self.ignore_index, 
-                label_smoothing=self.smooth, 
-                reduction=self.reduction
-            )
+            tgt[~mask] = -1
 
+        weight = self.weights if self.weights is not None else None
+
+        loss = F.cross_entropy(
+            logits,
+            tgt,
+            weight=weight,
+            ignore_index=-1,
+            reduction=self.reduction,
+            label_smoothing=self.smooth,
+        )
         return loss
 
 class FocalLoss(torch.nn.Module):
@@ -228,37 +208,50 @@ class FocalLoss(torch.nn.Module):
     https://arxiv.org/abs/1708.02002
     """
     def __init__(
-            self, 
-            weights: Optional[torch.Tensor]=None, 
-            gamma: float=2.0, 
+            self,
+            smooth: float=0.0,
+            weights: Optional[torch.Tensor]=None,
             reduction: str='mean',
-            eps: float=1e-8,
-            use_weights: bool=False
+            gamma: float=2.0
         ):
         """Instantiate a FocalLoss object.
 
         Parameters:
         -----------
+            smooth : float, optional
+                A float in the range [0.0, 1.0]. Specifies the amount of label smoothing to apply, by default 0.0.
             weights : torch.Tensor, optional
-                Weights of shape (C,) where C is the number of classes. Defaults to None.
-            gamma : float, optional
-                Focusing parameter for modulating factor (1-p). Defaults to 2.
+                A 1D tensor of shape (C,) where C is the number of classes. Each value is the weight for that class, by default None
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum' , 'none']. Defaults to 'mean'.
-            weights (Union[float, torch.Tensor], optional): _description_. Defaults to 1.
-            gamma (float, optional): _description_. Defaults to 2.
-            reduction (str, optional): _description_. Defaults to 'mean'.
+            gamma : float, optional
+                Focusing parameter for modulating factor (1-p). Defaults to 2.0.
         """
         super().__init__()
-        self.weights = weights
-        self.gamma = gamma
-        self.eps = eps
-        self.use_weights = use_weights
+        self.eps = 1e-8
         
-        # Validate reduction
+        # Validate arguments
+        if not isinstance(smooth, float) or not (0.0 <= smooth <= 1.0):
+            raise ValueError(
+                "'smooth' must be a float in the range [0.0, 1.0]; got {smooth} instead."
+            )
+        self.smooth = smooth
+
+        if not isinstance(weights, (torch.Tensor, type(None))):
+            raise ValueError(
+                f"'weights' must be a torch.Tensor or None; got {type(weights)} instead."
+            )
+        self.weights = weights
+
         if reduction not in ['mean', 'sum', 'none']:
             raise ValueError(f"Invalid reduction mode: {reduction}. Must be one of ['mean', 'sum', 'none']")
         self.reduction = reduction
+
+        if not isinstance(gamma, numbers.Real) or gamma < 0.0:
+            raise ValueError(
+                f"'gamma' must be a non-negative float; got {gamma} instead."
+            )
+        self.gamma = float(gamma)
     
     def forward(self, logits: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
         """Forward method of FocalLoss.
@@ -270,49 +263,50 @@ class FocalLoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
             loss : torch.Tensor
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
+        N, C = logits.shape[:2]
         if isinstance(self.weights, torch.Tensor) and len(self.weights) != logits.shape[1]:
-            raise ValueError(f"Length of weights should be the number of classes in logits, {logits.shape[1]}. Please check the weights.")
-
-        # Calculate cross entropy with no reduction
-        log_probs = F.log_softmax(logits, dim=1)
-        log_pt = log_probs.gather(1, targets.unsqueeze(1)).squeeze(1) # Gather the probabilities using the targets as an index
-        pt = torch.exp(log_pt).clamp(self.eps, 1-self.eps)
-
-        if self.use_weights and self.weights is not None:
-            alpha_t = self.weights[targets]
-        else:
-            alpha_t = 1.0
-
-        # Weighted focal loss
-        loss = -alpha_t * (1.0 - pt).pow(self.gamma) * log_pt 
-
-        # Mask the loss if mask is provided
-        if mask is not None:
-            mask = mask.to(loss.dtype)
-            loss = loss * mask
-
-            if self.reduction == "mean":
-                denom = mask.sum().clamp(min=1.0)
-                return loss.sum() / denom
-            elif self.reduction == 'sum':
-                return loss.sum()
-            else:
-                return loss
+            raise ValueError(
+                f"Length of weights should be the number of classes in logits, {logits.shape[1]}. Please check the weights or the logits passed."
+            )
         
-        # Apply reductions
-        if self.reduction == 'mean':
-            return loss.mean()
-        elif self.reduction == 'sum':
-            return loss.sum()
+        if mask is None:
+            mask = torch.ones_like(targets, dtype=torch.bool)
+
+        if self.weights is not None:
+            self.weights.to(logits.device, dtype=logits.dtype)
+            shape = [1, -1] + [1]*(logits.ndim-2)
+            class_weights = self.weights.view(*shape)
         else:
-            return loss
+            class_weights = 1.0
+
+        one_hot = F.one_hot(targets, num_classes=C).movedim(-1, 1).float()
+        if self.smooth > 0.0:
+            y_soft = (1 - self.smooth) * one_hot + (1 - one_hot) * self.smooth / (C - 1)
+        else:
+            y_soft = one_hot
+        
+        log_probs = torch.log_softmax(logits, dim=1)    # N, C, H, W
+        probs = log_probs.exp()                         # N, C, H, W
+
+        focal_factor = (1 - probs).pow(self.gamma)
+        
+        loss_per_class = - y_soft * class_weights * focal_factor * log_probs
+        loss_per_pixel = loss_per_class.sum(dim=1) # N, H, W
+        loss_per_pixel = loss_per_pixel * mask
+
+        if self.reduction == 'none':
+            return loss_per_pixel
+        elif self.reduction == 'sum':
+            return loss_per_pixel.sum()
+        elif self.reduction == 'mean':
+            return loss_per_pixel.sum() / mask.sum().clamp(min=1)
 
 class CBLoss(torch.nn.Module):
     """
