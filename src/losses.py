@@ -121,64 +121,37 @@ class CELoss(torch.nn.Module):
     Wrapper class for vanilla cross entropy loss.
     """
     def __init__(
-            self, 
-            ignore_index=-1, 
+            self,
             smooth: float=0.0, 
             weights: Optional[torch.Tensor]=None, 
-            reduction: str='mean', 
-            use_weights: bool=True
+            reduction: str='mean'
         ):
         """Instantiate a CELoss object.
 
         Parameters:
         -----------
-            ignore_index : int, optional
-                Index to ignore in the target, by default -1
             smooth : float, optional
                 A float in the range [0.0, 1.0]. Specifies the amount of smoothing to apply to the labels, by default 0.0
             weights : torch.Tensor, optional
                 A 1D tensor of shape (C,) where C is the number of classes. Each value is the weight for that class, by default None
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum', 'none']. Defaults to 'mean'.
-            use_weights : bool, optional
-                Whether to use the provided weights or not. Defaults to True.
         """
         super().__init__()
-        self.ignore_index = ignore_index
         self.smooth = smooth
         self.weights = weights
+        self.reduction = reduction
         
         # Validate reduction
         if reduction not in ['mean', 'sum', 'none']:
             raise ValueError(f"Invalid reduction mode: {reduction}. Must be one of ['mean', 'sum', 'none']")
-        self.reduction = reduction
 
-        self.use_weights = use_weights
-    
-    def _mask_targets(self, targets: torch.Tensor, mask: torch.BoolTensor, ignore_index: int=-1) -> torch.Tensor:
-        """
-        Helper function to create a new target with the ignore_index at the masked locations.
-
-        Parameters:
-        -----------
-            targets : torch.Tensor
-                A torch.Tensor of shape (N, H, W) and dtype int.
-            mask : torch.BoolTensor
-                A boolean torch tensor of shape (N, H, W).
-            ignore_index (int, optional): Index value to used for the masked values. Defaults to -1.
-
-        Returns:
-        --------
-            adj_targets : torch.Tensor
-                A tensor with the masked target values replaced by the ignore index.
-        """
-
-        # Create a new target tensor with ignore_index at the masked locations
-        adj_targets = torch.where(mask, targets, torch.full_like(targets, ignore_index)).to(targets.device)
-
-        return adj_targets
-
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
+    def forward(
+        self, 
+        logits: torch.Tensor,         # (N, C, H, W) or (N, C, M)
+        targets: torch.Tensor,        # (N, H, W) or (N, M)
+        mask: Optional[torch.BoolTensor] = None  # True = exclude
+    ) -> torch.Tensor:
         """
         Forward method of CELoss.
 
@@ -189,7 +162,7 @@ class CELoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to keep. Defaults to None.
 
         Returns:
         --------
@@ -197,29 +170,22 @@ class CELoss(torch.nn.Module):
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
 
-        # Apply mask if provided
-        if mask is not None:
-            targets = self._mask_targets(targets, mask, self.ignore_index)
-        
-        # Compute the loss
-        if self.use_weights:
-            loss = F.cross_entropy(
-                input=logits, 
-                target=targets, 
-                ignore_index=self.ignore_index, 
-                label_smoothing=self.smooth, 
-                reduction=self.reduction, 
-                weight=self.weights
-            )
-        else:
-            loss = F.cross_entropy(
-                input=logits, 
-                target=targets, 
-                ignore_index=self.ignore_index, 
-                label_smoothing=self.smooth, 
-                reduction=self.reduction
-            )
+        # Clone so we don’t modify caller’s tensor
+        tgt = targets.clone()
 
+        if mask is not None:
+            tgt[~mask] = -1
+
+        weight = self.weights if self.weights is not None else None
+
+        loss = F.cross_entropy(
+            logits,
+            tgt,
+            weight=weight,
+            ignore_index=-1,
+            reduction=self.reduction,
+            label_smoothing=self.smooth,
+        )
         return loss
 
 class FocalLoss(torch.nn.Module):
