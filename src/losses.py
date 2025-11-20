@@ -789,33 +789,35 @@ class TvmfDiceLoss(torch.nn.Module):
     def __init__(
         self, 
         kappa: Optional[float]=0,
-        smooth: float = 1.0, 
+        smooth: float = 0.0, 
         reduction: str = 'mean',
-        eps: float = 1.e-8,
-        exclude_empty_target: bool=True
+        exclude_empty_target: bool=True,
+        adaptive: bool=False
     ):
         """Instantiate a TvmfDiceLoss object.
 
         Parameters:
         -----------
-            k : float, optional
+            kappa : float, optional
                 Weights the denominator of the t-vMF loss
             smooth : float, optional
-                A smoothing factor to avoid division by zero. Defaults to 1.0.
+                A smoothing factor to avoid division by zero. Defaults to 0.0.
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum', 'none']. Defaults to 'mean'.
-            eps : float
-                The machine eps to use to avoid DivisionByZeroError.
+            exclude_empty_target : bool, optional
+                Whether to exclude classes with no target pixels from the loss calculation. Defaults to True.
+            adaptive : bool, optional
+                Whether to use adaptive kappa. NOT IMPLEMENTED YET.
         """
         super().__init__()
         self.kappa = kappa
         self.smooth = smooth
         self.reduction = reduction
-        self.eps = eps
+        self.eps = 1e-8
         self.exclude_empty_target = bool(exclude_empty_target)
 
     def _flatten_per_class(self, X: torch.Tensor) -> torch.Tensor:
-        X = X.permute(1, 0, *range(2, X.ndim)).contiguous()
+        X = X.movedim(1, 0).contiguous()
 
         return X.reshape(X.shape[0], -1)
     
@@ -829,7 +831,7 @@ class TvmfDiceLoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
@@ -838,17 +840,22 @@ class TvmfDiceLoss(torch.nn.Module):
         """
         # Calculate probabilities and targets
         probs = torch.softmax(logits, dim=1)
-        C = probs.shape[1]
+        N, C = probs.shape[:2]
         targets_oh = F.one_hot(targets, num_classes=C).movedim(-1, 1).float()
-        
-        if mask is not None:
-            mask = mask.unsqueeze(1)
-            probs = probs * mask
-            targets_oh = targets_oh * mask
 
         # Flatten and normalize vectors for cosine similarity
         A = self._flatten_per_class(probs) # Tensor of shape (C, N*H*W)
-        B = self._flatten_per_class(targets_oh)
+        B_raw = self._flatten_per_class(targets_oh)
+
+        if mask is not None:
+            mask = mask.reshape(1, -1).expand(C, -1)
+            A = A[mask].reshape(C, -1)
+            B_raw = B_raw[mask].reshape(C, -1)
+
+        B = B_raw
+        # Apply label smoothing if specified
+        if self.smooth > 0.0:
+            B = B * (1.0 - self.smooth) + (1.0 - B) * self.smooth / (C - 1)
 
         A = A / (A.norm(dim=1, keepdim=True) + self.eps)
         B = B / (B.norm(dim=1, keepdim=True) + self.eps)
@@ -862,13 +869,16 @@ class TvmfDiceLoss(torch.nn.Module):
         class_loss = (1.0 - phi_t) ** 2
 
         if self.exclude_empty_target:
-            idx = B.norm(dim=1) > 0
+            idx = B_raw.norm(dim=1) > 0
             if idx.any():
                 class_loss = class_loss[idx]
+            else:
+                return logits.new_tensor(0.0)
 
         if self.reduction == 'mean':
             return torch.mean(class_loss)
         elif self.reduction == 'sum':
             return torch.sum(class_loss)
-        else:
+        elif self.reduction == 'none':
             return class_loss
+    
