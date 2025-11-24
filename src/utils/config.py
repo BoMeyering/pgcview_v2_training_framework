@@ -78,6 +78,7 @@ class Loss:
     alpha: float=0.5
     beta: float=0.5
     kappa: float=0.0
+    lambda_k: Optional[float]=None
     exclude_empty_target: bool=True
 
 @dataclass

@@ -792,7 +792,7 @@ class TvmfDiceLoss(torch.nn.Module):
         smooth: float = 0.0, 
         reduction: str = 'mean',
         exclude_empty_target: bool=True,
-        adaptive: bool=False
+        lambda_k: Optional[float]=None
     ):
         """Instantiate a TvmfDiceLoss object.
 
@@ -806,8 +806,8 @@ class TvmfDiceLoss(torch.nn.Module):
                 The reduction method to use. Must be one of ['mean', 'sum', 'none']. Defaults to 'mean'.
             exclude_empty_target : bool, optional
                 Whether to exclude classes with no target pixels from the loss calculation. Defaults to True.
-            adaptive : bool, optional
-                Whether to use adaptive kappa. NOT IMPLEMENTED YET.
+            lambda_k : float, optional
+                Float value used to determine adaptive kappa. Either float or None. Defaults to None.
         """
         super().__init__()
         self.kappa = kappa
@@ -815,6 +815,9 @@ class TvmfDiceLoss(torch.nn.Module):
         self.reduction = reduction
         self.eps = 1e-8
         self.exclude_empty_target = bool(exclude_empty_target)
+        self.lambda_k = lambda_k
+
+
 
     def _flatten_per_class(self, X: torch.Tensor) -> torch.Tensor:
         X = X.movedim(1, 0).contiguous()
@@ -876,9 +879,16 @@ class TvmfDiceLoss(torch.nn.Module):
                 return logits.new_tensor(0.0)
 
         if self.reduction == 'mean':
-            return torch.mean(class_loss)
+            loss = torch.mean(class_loss)
         elif self.reduction == 'sum':
-            return torch.sum(class_loss)
+            loss = torch.sum(class_loss)
         elif self.reduction == 'none':
-            return class_loss
+            loss = class_loss
+
+        # Update adaptive kappa if lambda_k is set
+        if self.lambda_k is not None:
+            dsc_t = torch.mean(class_loss.detach())
+            self.kappa = dsc_t * self.lambda_k
+        
+        return loss
     
