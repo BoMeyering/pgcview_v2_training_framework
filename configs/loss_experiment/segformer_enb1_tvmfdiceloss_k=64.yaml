@@ -1,5 +1,5 @@
 # Training configs
-model_run: loss_exp_segformer_enb1_focalloss
+model_run: loss_exp_segformer_enb1_tvmfdiceloss_k=64
 
 # Computation Device
 device: cuda
@@ -61,11 +61,11 @@ scheduler:
 
 # Criterion / Loss Function
 loss:
-  name: FOCALLOSS
+  name: TVMFDICELOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
   smooth: 0.05
-  gamma: 2.0
+  kappa: 64
 
 # Batch Sizes
 batch_size:

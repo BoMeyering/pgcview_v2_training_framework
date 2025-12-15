@@ -95,3 +95,10 @@ More details can be found [here](https://arxiv.org/abs/1706.05721).
 
 ## Loss Function Implementation in Pytorch
 We wrote implementations of all these loss functions in Pytorch using a consistent API call such that they can all be easily called from within the trainer class. Additionally, since the FlexMatch algorithm requires masking non-confident pixels, each ```forward()``` call of the loss module can accept a binary mask of shape ```(H, W)``` to get rid of any pixels in the loss matrix that do not pass the threshold.
+
+ Additionally we implemented label smoothing for all loss functions. Label smoothing is a regularization technique that replaces the one-hot encoded ground truth vector with a smoothed version such that for a given class $c$ and smoothing parameter $\epsilon$, the new ground truth vector is defined as:
+ $$
+ \begin{equation}
+     y_{c}^{LS} = (1-\epsilon)y_c + \frac{\epsilon}{C}
+ \end{equation}
+ $$ 

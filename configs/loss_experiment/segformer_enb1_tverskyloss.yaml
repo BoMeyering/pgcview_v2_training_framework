@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 200
+  epochs: 100
   sanity_check: True
 
 # Model Architecture
@@ -64,10 +64,9 @@ loss:
   name: TVERSKYLOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
-  use_weights: false
+  smooth: 005
   alpha: .5
   beta: .5
-  smooth: 5e-2
 
 # Batch Sizes
 batch_size:

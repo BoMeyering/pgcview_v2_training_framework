@@ -19,6 +19,7 @@ from omegaconf import OmegaConf
 from src.utils.config import LossCriterion
 from src.utils.loggers import rank_log
 from src.distributed import is_main_process
+import torch.distributed as dist
 
 logger = logging.getLogger()
 
@@ -316,9 +317,10 @@ class CBLoss(torch.nn.Module):
     def __init__(
             self, 
             samples: torch.Tensor, 
-            loss_type: str, 
+            loss_type: str='CELoss', 
+            smooth: float=0.0,
             reduction: str='mean', 
-            gamma: Optional[float]=2.0
+            gamma: float=2.0
         ):
         """Instantiate a CBLoss object.
 
@@ -328,6 +330,8 @@ class CBLoss(torch.nn.Module):
                 A 1D tensor of shape (C,) where C is the number of classes. Each value is the number of samples for that class in the training set.
             loss_type : str
                 The type of loss to use. Must be one of ['CELoss', 'FocalLoss'].
+            smooth : float, optional
+                A float in the range [0.0, 1.0]. Specifies the amount of smoothing to apply to the labels, by default 0.0.
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum']. Defaults to 'mean'.
             gamma : float, optional
@@ -340,19 +344,22 @@ class CBLoss(torch.nn.Module):
         super().__init__()
         self.samples = samples.to(dtype=torch.float64)
         self.loss_type = loss_type
+        self.smooth = smooth
         self.reduction = reduction
         self.gamma = gamma
+
+        # Calculate effective number of samples
         self.N = self.samples.sum().to(dtype=torch.float64)
-        self.beta = (self.N - 1) / self.N
+        self.beta = (self.samples - 1) / self.samples
         self.C = len(self.samples)
-        self.eps = 1e-7
+        self.eps = 1e-8
 
         # Set the loss function with the proper weights
         self._set_effective_samples()
         if self.loss_type == 'CELoss':
-            self.loss_fn = CELoss(weights=self.weights, reduction=self.reduction)
+            self.loss_fn = CELoss(smooth=self.smooth, weights=self.weights, reduction=self.reduction)
         elif self.loss_type == 'FocalLoss':
-            self.loss_fn = FocalLoss(weights=self.weights, gamma=self.gamma, reduction=self.reduction)
+            self.loss_fn = FocalLoss(smooth=self.smooth, weights=self.weights, reduction=self.reduction, gamma=self.gamma)
         else:
             raise ValueError(f"Invalid loss type: {self.loss_type}. Must be one of ['CELoss', 'FocalLoss']")
 
@@ -366,8 +373,6 @@ class CBLoss(torch.nn.Module):
         # Calculate effective samples
         E = self.N * (1.0 - torch.exp(-self.samples / self.N))
         E = torch.clamp(E, min=1e-12)
-
-        # E = (1 - torch.pow(self.beta, self.samples)).double() / (1 - self.beta + self.eps).double()
 
         # Invert to get weights weights and normalize to sum to C
         invE = 1.0 / E
@@ -390,7 +395,7 @@ class CBLoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
@@ -411,8 +416,9 @@ class ACBLoss(torch.nn.Module):
             self, 
             samples: torch.Tensor, 
             loss_type: str, 
+            smooth: float=0.0,
             reduction: str='mean', 
-            gamma: Optional[float]=2.0
+            gamma: float=2.0
         ):
         """Instantiate an ACBLoss object.
 
@@ -422,6 +428,8 @@ class ACBLoss(torch.nn.Module):
                 A 1D tensor of shape (C,) where C is the number of classes. Each value is the number of samples for that class in the training set.
             loss_type : str
                 The type of loss to use. Must be one of ['CELoss', 'FocalLoss'].
+            smooth : float, optional
+                A float in the range [0.0, 1.0]. Specifies the amount of smoothing to apply to the labels, by default 0.0
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum']. Defaults to 'mean'.
             gamma : float, optional
@@ -434,6 +442,7 @@ class ACBLoss(torch.nn.Module):
         super().__init__()
         self.samples = samples.double()
         self.loss_type = loss_type
+        self.smooth = smooth
         self.reduction = reduction
         self.gamma = gamma
         self.N = self.samples.sum()
@@ -443,9 +452,9 @@ class ACBLoss(torch.nn.Module):
 
         self._set_effective_samples()
         if self.loss_type == 'CELoss':
-            self.loss_fn = CELoss(weights=self.weights.float(), reduction=self.reduction)
+            self.loss_fn = CELoss(smooth=self.smooth, weights=self.weights.float(), reduction=self.reduction)
         elif self.loss_type == 'FocalLoss':
-            self.loss_fn = FocalLoss(weights=self.weights.float(), gamma=self.gamma, reduction=self.reduction)
+            self.loss_fn = FocalLoss(smooth=self.smooth, weights=self.weights.float(), reduction=self.reduction, gamma=self.gamma)
         else:
             raise ValueError(f"Invalid loss type: {self.loss_type}. Must be one of ['CELoss', 'FocalLoss']")
 
@@ -487,20 +496,7 @@ class ACBLoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
-
-
-        Returns:
-            torch.Tensor: A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
-
-        Parameters:
-        -----------
-            logits : torch.Tensor
-                The raw logits from the model.
-            targets : torch.Tensor
-                The ground truth targets.
-            mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
@@ -521,8 +517,9 @@ class RecallLoss(torch.nn.Module):
             self, 
             samples: torch.Tensor, 
             loss_type: str, 
+            smooth: float=0.0,
             reduction: str='mean', 
-            gamma: Optional[float]=2.0, 
+            gamma: float=2.0, 
             eps: float=1e-8
         ):
         """Instantiate a RecallLoss object.
@@ -543,6 +540,7 @@ class RecallLoss(torch.nn.Module):
         super().__init__()
         self.samples = samples
         self.loss_type = loss_type
+        self.smooth = smooth
         self.reduction = reduction
         self.gamma = gamma
         self.N = self.samples.sum()
@@ -551,9 +549,9 @@ class RecallLoss(torch.nn.Module):
 
         # Set the loss function with the proper weights
         if self.loss_type == 'CELoss':
-            self.loss_fn = CELoss(weights=None, reduction=self.reduction)
+            self.loss_fn = CELoss(smooth=self.smooth, weights=None, reduction=self.reduction)
         elif self.loss_type == 'FocalLoss':
-            self.loss_fn = FocalLoss(weights=None, gamma=self.gamma, reduction=self.reduction)
+            self.loss_fn = FocalLoss(smooth=self.smooth, weights=None, reduction=self.reduction, gamma=self.gamma)
         else:
             raise ValueError(f"Invalid loss type: {self.loss_type}. Must be one of ['CELoss', 'FocalLoss']")
 
@@ -605,7 +603,7 @@ class RecallLoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
@@ -628,7 +626,6 @@ class DiceLoss(torch.nn.Module):
     """
     def __init__(
             self, 
-            smooth: float = 1.0, 
             reduction: str = 'mean',
             gamma: Optional[float]=1.0,
         ):
@@ -636,16 +633,14 @@ class DiceLoss(torch.nn.Module):
 
         Parameters:
         -----------
-            smooth : float, optional
-                A smoothing factor to avoid division by zero. Defaults to 1.0.
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum', 'none']. Defaults to 'mean'.
             gamma : float, optional
                 An optional float focusing parameter for a focal variant of DiceLoss
         """
         super().__init__()
-        self.smooth = smooth
         self.gamma = gamma
+        self.eps = 1.0 # Constant to avoid zero division
 
         # Validate reduction
         if reduction not in ['mean', 'sum', 'none']:
@@ -662,11 +657,11 @@ class DiceLoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
-            loss :  torch.Tensor
+            loss : torch.Tensor
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (C,).
         """
         # 
@@ -679,11 +674,12 @@ class DiceLoss(torch.nn.Module):
             probs = probs * mask
             targets_oh = targets_oh * mask
         
+        # Sum operations only affect non-masked pixels so no special handling needed during reduction
         intersection = (probs * targets_oh).sum(reduce_dims)
         probs_2 = (probs ** 2).sum(dim=reduce_dims)
         gt_2 = (targets_oh ** 2).sum(dim=reduce_dims)
 
-        dc_per_class = (2.0 * intersection + self.smooth) / (probs_2 + gt_2 + self.smooth)
+        dc_per_class = (2.0 * intersection + self.eps) / (probs_2 + gt_2 + self.eps)
         
         # Compute the loss and apply focal power
         # When focal_gamma == 1, this is the same a unfocused Dice Loss
@@ -714,9 +710,7 @@ class TverskyLoss(torch.nn.Module):
             self, 
             alpha: float = 0.5, 
             beta: float = 0.5, 
-            smooth: float = 1.0, 
-            reduction: str = 'mean',
-            eps: float = 1.e-8
+            reduction: str = 'mean'
         ):
         """Instantiate a TverskyLoss object.
 
@@ -726,17 +720,14 @@ class TverskyLoss(torch.nn.Module):
                 Weight for false negatives. Defaults to 0.5.
             beta : float, optional
                 Weight for false positives. Defaults to 0.5.
-            smooth : float, optional
-                A smoothing factor to avoid division by zero. Defaults to 1.0.
             reduction : str, optional
                 The reduction method to use. Must be one of ['mean', 'sum', 'none']. Defaults to 'mean'.
         """
         super().__init__()
         self.alpha = alpha
         self.beta = beta
-        self.smooth = smooth
         self.reduction = reduction
-        self.eps = eps
+        self.eps = 1.0
     
     def forward(self, logits: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
         """Forward method of TverskyLoss.
@@ -748,7 +739,7 @@ class TverskyLoss(torch.nn.Module):
             targets : torch.Tensor
                 The ground truth targets of shape (N, H, W).
             mask : torch.BoolTensor, optional
-                A boolean torch tensor of shape (N, H, W) of pixels to exclude. Defaults to None.
+                A boolean torch tensor of shape (N, H, W) of pixels to include. Defaults to None.
 
         Returns:
         --------
@@ -770,8 +761,8 @@ class TverskyLoss(torch.nn.Module):
         false_neg = ((1 - probs) * targets_one_hot).sum(dim=reduce_dims)
         false_pos = (probs * (1 - targets_one_hot)).sum(dim=reduce_dims)
 
-        # Calculate Tversky index and loss
-        tversky_index = (true_pos + self.smooth) / (true_pos + self.alpha * false_neg + self.beta * false_pos + self.smooth)
+        # Calculate Tversky index and loss per class
+        tversky_index = (true_pos + self.eps) / (true_pos + self.alpha * false_neg + self.beta * false_pos + self.eps)
         loss = 1 - tversky_index
 
         if self.reduction == 'mean':
@@ -888,7 +879,10 @@ class TvmfDiceLoss(torch.nn.Module):
         # Update adaptive kappa if lambda_k is set
         if self.lambda_k is not None:
             dsc_t = torch.mean(class_loss.detach())
-            self.kappa = dsc_t * self.lambda_k
-        
+            kappa = dsc_t * self.lambda_k
+            dist.all_reduce(kappa, op=dist.ReduceOp.SUM)
+            kappa /= dist.get_world_size()
+            self.kappa = kappa.item()
+            
         return loss
     

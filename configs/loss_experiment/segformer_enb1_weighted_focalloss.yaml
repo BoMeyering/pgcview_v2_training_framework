@@ -64,7 +64,7 @@ loss:
   name: FOCALLOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
-  use_weights: true
+  smooth: 0.05
   gamma: 2.0
 
 # Batch Sizes

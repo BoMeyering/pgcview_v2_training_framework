@@ -1,5 +1,5 @@
 # Training configs
-model_run: loss_exp_segformer_enb1_tvmfdiceloss
+model_run: loss_exp_segformer_enb1_tvmfdiceloss_k=32
 
 # Computation Device
 device: cuda
@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 200
+  epochs: 100
   sanity_check: True
 
 # Model Architecture
@@ -64,7 +64,7 @@ loss:
   name: TVMFDICELOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
-  use_weights: false
+  smooth: 0.05
   kappa: 32
 
 # Batch Sizes

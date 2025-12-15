@@ -1,12 +1,12 @@
 # Training configs
-model_run: loss_exp_segformer_enb1_focalloss
+model_run: test_run_segformer_enb1_focalloss
 
 # Computation Device
 device: cuda
 
 # Images
 images:
-  resize: [512, 512]
+  resize: [1024, 1024]
 
 # Metadata for normalization
 metadata:
@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 100
+  epochs: 200
   sanity_check: True
 
 # Model Architecture
@@ -69,7 +69,7 @@ loss:
 
 # Batch Sizes
 batch_size:
-  labeled: 6
+  labeled: 3
   unlabeled: 2
 
 # Flexmatch
