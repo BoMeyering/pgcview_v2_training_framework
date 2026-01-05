@@ -1,12 +1,12 @@
 # Training configs
-model_run: loss_exp_segformer_enb1_diceloss
+model_run: baseline_segformer_enb1_tvmfdiceloss_k=16
 
 # Computation Device
 device: cuda
 
 # Images
 images:
-  resize: [512, 512]
+  resize: [1024, 1024]
 
 # Metadata for normalization
 metadata:
@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 100
+  epochs: 200
   sanity_check: True
 
 # Model Architecture
@@ -61,13 +61,14 @@ scheduler:
 
 # Criterion / Loss Function
 loss:
-  name: DICELOSS
+  name: TVMFDICELOSS
   reduction: mean
-  gamma: 1.0
+  smooth: 0.05
+  kappa: 16
 
 # Batch Sizes
 batch_size:
-  labeled: 6
+  labeled: 5
   unlabeled: 2
 
 # Flexmatch

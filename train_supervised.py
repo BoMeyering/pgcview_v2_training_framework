@@ -78,10 +78,18 @@ set_torch_device(conf)
 # Set data normalization values
 set_normalization_values(conf)
 
+# print(type(conf.loss.samples))
+
 # Read class sample counts from file and set conf.loss samples and inverse weights
-samples, inv_weights = read_class_counts(conf.loss.class_sample_count_path)
-conf.loss.samples, conf.loss.weights = samples, inv_weights
-rank_log(conf.is_main, logger.info, f"Set conf.loss.samples and conf.loss.weights from {conf.loss.class_sample_count_path}")
+if conf.loss.get('class_sample_count_path', None) is not None:
+    print(conf.loss.class_sample_count_path)
+    samples, inv_weights = read_class_counts(conf.loss.class_sample_count_path)
+    conf.loss.samples, conf.loss.weights = samples, inv_weights
+    rank_log(conf.is_main, logger.info, f"Set conf.loss.samples and conf.loss.weights from {conf.loss.class_sample_count_path}")
+else:
+    del conf.loss.samples
+    del conf.loss.weights
+    rank_log(conf.is_main, logger.info, f"No class sample count path provided; not setting conf.loss.samples or conf.loss.weights.")
 
 #----------------------------------------#
 # Main entry point

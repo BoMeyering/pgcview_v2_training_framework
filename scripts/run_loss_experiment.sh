@@ -14,8 +14,13 @@ configs=(
     "configs/loss_experiment/segformer_enb1_diceloss.yaml"
     "configs/loss_experiment/segformer_enb1_focal1.5diceloss.yaml"
     "configs/loss_experiment/segformer_enb1_focal2.0diceloss.yaml"
-    "configs/loss_experiment/segformer_enb1_tverskyloss.yaml"  
-    "configs/loss_experiment/segformer_enb1_tvmfdiceloss.yaml"  
+    "configs/loss_experiment/segformer_enb1_tverskyloss.yaml"
+    "configs/loss_experiment/segformer_enb1_tvmfdiceloss_k=16.yaml"
+    "configs/loss_experiment/segformer_enb1_tvmfdiceloss_k=32.yaml"
+    "configs/loss_experiment/segformer_enb1_tvmfdiceloss_k=64.yaml"
+    "configs/loss_experiment/segformer_enb1_tvmfdiceloss_lam=2.yaml"
+    "configs/loss_experiment/segformer_enb1_tvmfdiceloss_lam=32.yaml"
+    "configs/loss_experiment/segformer_enb1_tvmfdiceloss_lam=128.yaml"
 )
 
 for cfg in "${configs[@]}"; do

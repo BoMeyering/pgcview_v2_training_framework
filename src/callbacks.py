@@ -22,6 +22,7 @@ class CheckpointManager:
         self.conf = conf
         self.top_k = top_k
         self.top_checkpoints = []  # min-heap of (val_loss, filepath)
+        self.most_recent_checkpoint = []
 
         self.checkpoint_sub_dir = Path(self.checkpoint_dir) / self.model_run_name
         if not os.path.exists(self.checkpoint_sub_dir):
@@ -35,6 +36,25 @@ class CheckpointManager:
         if current is None:
             rank_log(self.conf.is_main, self.logger.warning, f"Warning: Metric '{self.monitor}' is not available. Skipping checkpoint.")
             return None
+
+        if self.conf.is_main:
+            if len(self.most_recent_checkpoint) > 0:
+                # Remove previous most recent checkpoint
+                prev_chkpt_path = self.most_recent_checkpoint.pop()[1]
+                if os.path.exists(prev_chkpt_path):
+                    os.remove(prev_chkpt_path)
+                    rank_log(self.conf.is_main, self.logger.info, f"Removed previous most recent checkpoint: {prev_chkpt_path}")
+            chkpt_filename = self.checkpoint_sub_dir / f"{self.model_run_name}_latest_epoch_{epoch}_vloss-{current:.6f}.pth"
+            chkpt = {
+                'model_state_dict': logs['model_state_dict'],
+                'epoch': epoch,
+                'monitor': self.monitor,
+                self.monitor: current,
+                **self.conf
+            }
+            torch.save(chkpt, chkpt_filename)
+            self.most_recent_checkpoint.append((epoch, chkpt_filename))
+            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} checkpoint saved as most recent checkpoint. Saved to {chkpt_filename}")
 
         # If we don't have enough checkpoints yet or current is better than the worst of top_k
         should_save = len(self.top_checkpoints) < self.top_k or self.monitor_op(current, self.top_checkpoints[-1][0])

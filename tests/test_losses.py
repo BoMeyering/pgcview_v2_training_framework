@@ -310,9 +310,6 @@ class TestLossOverfit(unittest.TestCase):
     def setUp(self):
         """ Set up the test class """
         
-        self.logits = torch.randn(BATCH_SIZE, N_CLASSES, INPUT_SIZE, INPUT_SIZE, requires_grad=True) # Logits of size (BATCH_SIZE, N_CLASSES, INPUT_SIZE, INPUT_SIZE)
-        self.targets = torch.randint(0, N_CLASSES, (BATCH_SIZE, INPUT_SIZE, INPUT_SIZE)) # Targets of size (BATCH_SIZE, INPUT_SIZE, INPUT_SIZE)
-        self.optim = torch.optim.SGD([self.logits], lr=0.5)
         self.weights = torch.tensor(np.random.randn(N_CLASSES), dtype=torch.float32)
         self.samples = torch.tensor(np.random.randint(100, 200, (N_CLASSES)), dtype=torch.float32)
 
@@ -329,22 +326,28 @@ class TestLossOverfit(unittest.TestCase):
             "recall_ce": RecallLoss(samples=self.samples, loss_type="CELoss"),
             "recall_focal": RecallLoss(samples=self.samples, loss_type="FocalLoss"),
             "dice": DiceLoss(),
-            "tversky": TverskyLoss()
+            "tvmfdice": TvmfDiceLoss(kappa=16)
+            # "tversky": TverskyLoss()
         }
 
     def test_overfit_losses(self):
         """ Overfit all loss functions """
         # Overfit each loss fucntion and test that the final loss decreases
+
         for name, loss_fn in self.loss_funs.items():
+            logits = torch.randn(BATCH_SIZE, N_CLASSES, INPUT_SIZE, INPUT_SIZE, requires_grad=True) # Logits of size (BATCH_SIZE, N_CLASSES, INPUT_SIZE, INPUT_SIZE)
+            targets = torch.randint(0, N_CLASSES, (BATCH_SIZE, INPUT_SIZE, INPUT_SIZE)) # Targets of size (BATCH_SIZE, INPUT_SIZE, INPUT_SIZE)
+            optim = torch.optim.SGD([logits], lr=0.5)
+
             # Zero the gradient and calculate loss0
-            self.optim.zero_grad()
-            loss0 = loss_fn(self.logits, self.targets).item()
+            optim.zero_grad()
+            loss0 = loss_fn(logits, targets).item()
 
             for _ in range(200):
-                self.optim.zero_grad()
-                loss = loss_fn(self.logits, self.targets)
+                optim.zero_grad()
+                loss = loss_fn(logits, targets)
                 loss.backward()
-                self.optim.step()
+                optim.step()
             self.assertLess(loss.item(), loss0)
 
 class TestLossReductionMode(unittest.TestCase):

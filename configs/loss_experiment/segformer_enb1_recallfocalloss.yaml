@@ -28,7 +28,7 @@ directories:
 
 # Training
 training:
-  epochs: 200
+  epochs: 100
   sanity_check: True
 
 # Model Architecture
@@ -44,7 +44,7 @@ model:
 # Optimizer stuff
 optimizer:
   name: AdamW
-  weight_decay: 0.0001
+  weight_decay: 0.001
   filter_bias_and_bn: True
   ema: True
   ema_decay: 0.9
@@ -64,8 +64,9 @@ loss:
   name: RECALLLOSS
   class_sample_count_path: 'metadata/class_sample_counts.json'
   reduction: mean
-  use_weights: false
+  smooth: 0.05
   loss_type: FOCALLOSS
+  gamma: 2.0
 
 # Batch Sizes
 batch_size:

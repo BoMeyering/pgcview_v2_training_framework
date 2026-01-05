@@ -1,5 +1,5 @@
 # Training configs
-model_run: loss_exp_segformer_enb1_diceloss
+model_run: loss_exp_segformer_enb1_tvmfdiceloss_lam=2
 
 # Computation Device
 device: cuda
@@ -61,9 +61,10 @@ scheduler:
 
 # Criterion / Loss Function
 loss:
-  name: DICELOSS
+  name: TVMFDICELOSS
   reduction: mean
-  gamma: 1.0
+  smooth: 0.05
+  lambda_k: 2.0
 
 # Batch Sizes
 batch_size:
