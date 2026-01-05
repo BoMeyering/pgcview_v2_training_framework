@@ -13,14 +13,24 @@ from typing import Tuple
 def class_beta(logits: torch.Tensor, tau: float=0.85, mapping: str='linear', warmup: bool=True) -> torch.Tensor:
     """
     Functional class Tau calculator
+    Implements class-wise dynamic confidence thresholding as described in FlexMatch:
+    "FlexMatch: Boosting Semi-Supervised Learning with Curriculum Pseudo Labeling"
+    https://arxiv.org/abs/2110.08263
 
-    Args:
-        logits (torch.Tensor): A torch.Tensor of the raw model logits of shape (N, C, H, W).
-        tau (float, optional): A float value in th interval (0, 1] used for confidence thresholding. Defaults to 0.85.
-        mapping (str, optional): An optional string indicating the linear or non-linear mapping function to apply. Defaults to 'linear'.
-        warmup (bool, optional): Whether or not beta warmup should be performed. Defaults to True.
+
+    Parameters:
+    -----------
+        logits : torch.Tensor
+            A torch.Tensor of the raw model logits of shape (N, C, H, W).
+        tau : float, optional
+            A float value in th interval (0, 1] used for confidence thresholding. Defaults to 0.85.
+        mapping : str, optional
+            An optional string indicating the linear or non-linear mapping function to apply. Defaults to 'linear'.
+        warmup : bool, optional
+            Whether or not beta warmup should be performed. Defaults to True.
 
     Returns:
+    --------
         torch.Tensor: torch.Tensor: A torch.Tensor of shape (C) with a beta weight in [0, 1] for each class c.
     """
 
@@ -28,7 +38,7 @@ def class_beta(logits: torch.Tensor, tau: float=0.85, mapping: str='linear', war
     if type(logits) != torch.Tensor:
         raise ValueError("Argument 'logits' should be type 'torch.Tensor'. Ensure that you passed the correct logits.")
     elif len(logits.shape) != 4:
-        raise ValueError("ARgument 'logits' should be a tensor of shape (N, C, H, W). Please ensure that your logits dimensions are correct.")
+        raise ValueError("Argument 'logits' should be a tensor of shape (N, C, H, W). Please ensure that your logits dimensions are correct.")
     elif logits.shape[1] == 0:
         raise ValueError("Argument 'logits' cannot have a class dimension of 0.")
     elif tau <= 0 or tau > 1:
@@ -38,9 +48,9 @@ def class_beta(logits: torch.Tensor, tau: float=0.85, mapping: str='linear', war
     elif mapping not in ['convex', 'concave', 'linear']:
         raise ValueError(f"Argument 'mapping' must be one of 'convex', 'concave' or 'linear'")
     
+    num_classes = logits.shape[1]
     try:
         # Softmax and get probs and predictions
-        num_classes = logits.shape[1]
         probs = torch.softmax(logits, dim=1)
         max_probs, pred_classes = torch.max(probs, dim=1)
         
@@ -57,6 +67,10 @@ def class_beta(logits: torch.Tensor, tau: float=0.85, mapping: str='linear', war
         sigma_t = torch.bincount(masked_preds, minlength=num_classes)
 
         # Create normalized beta_t vector
+        print("Sigmat t: ", sigma_t)
+        print("Sigma_t:", sigma_t.max())
+        print("SIgma_t sum:", sigma_t.sum())
+        print("N - sum(sigma_t):", N - sigma_t.sum())
         if warmup:
             beta_t = sigma_t / torch.max(torch.tensor([sigma_t.max(), N - sigma_t.sum()]))
         else:     
@@ -119,3 +133,16 @@ def mask_targets(targets: torch.Tensor, mask: torch.Tensor, ignore_index: int=-1
     adj_targets = torch.where(mask, targets, torch.full_like(targets, ignore_index))
 
     return adj_targets
+
+if __name__ == "__main__":
+    raw_logits = torch.randn(3, 5, 5, 5)
+    print(raw_logits)
+
+    logits = raw_logits**4
+    print(logits)
+
+    cb = class_beta(raw_logits, tau=0.85, mapping='linear', warmup=True)
+    print(cb)
+
+    cb = class_beta(logits, tau=0.85, mapping='linear', warmup=True)
+    print(cb)
