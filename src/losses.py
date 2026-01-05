@@ -536,7 +536,7 @@ class ACBLoss(torch.nn.Module):
         """
         
         loss = self.loss_fn(logits=logits, targets=targets, mask=mask)
-        print(self.weights)
+        
         return loss
 
 class RecallLoss(torch.nn.Module):
