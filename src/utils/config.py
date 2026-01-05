@@ -67,10 +67,9 @@ class Training:
 @dataclass
 class Loss:
     name: LossCriterion=LossCriterion.CELOSS
-    class_sample_count_path: str='metadata/class_sample_counts.json'
+    class_sample_count_path: Optional[str]=None
     samples: Optional[List[float]]=field(default_factory=list)
     weights: Optional[List[float]]=field(default_factory=list)
-    use_weights: bool=False
     reduction: str='mean'
     loss_type: str='CELOSS'
     gamma: float=1.0

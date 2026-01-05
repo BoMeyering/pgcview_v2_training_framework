@@ -181,6 +181,7 @@ class CELoss(torch.nn.Module):
             loss : torch.Tensor
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
+        
         if isinstance(self.weights, torch.Tensor) and len(self.weights) != logits.shape[1]:
             raise ValueError(
                 f"Length of weights should be the number of classes in logits, {logits.shape[1]}. Please check the weights or the logits passed."
@@ -362,7 +363,33 @@ class CBLoss(torch.nn.Module):
             self.loss_fn = FocalLoss(smooth=self.smooth, weights=self.weights, reduction=self.reduction, gamma=self.gamma)
         else:
             raise ValueError(f"Invalid loss type: {self.loss_type}. Must be one of ['CELoss', 'FocalLoss']")
+        
+    def _tau_search(self, wmin: float, wmax: float, spread: float) -> float:
+        """ Bisection search to find tau given spread constraint """
+        diff = np.inf
+        tol = 1e-8
+        tl = 0.0
+        tu = 5.0
+        current = 1000
 
+        while diff > tol:
+            tm = (tl + tu) / 2
+
+            ftm = wmax**tm - wmin**tm - spread
+
+            if ftm > 0:
+                tu = tm
+            elif ftm < 0:
+                tl = tm
+
+            diff = np.abs(tm - current)
+            if diff < tol:
+                break
+            else:
+                current = tm
+        
+        return tm
+    
     def _set_effective_samples(self):
         """Helper function to calculate the effective samples and weights.
         
@@ -371,11 +398,15 @@ class CBLoss(torch.nn.Module):
         """
 
         # Calculate effective samples
-        E = self.N * (1.0 - torch.exp(-self.samples / self.N))
-        E = torch.clamp(E, min=1e-12)
+        E = (1.0 - self.beta ** self.samples) / (1.0 - self.beta + self.eps)
 
         # Invert to get weights weights and normalize to sum to C
         invE = 1.0 / E
+        weights = invE / invE.mean()
+
+        # Modulate by tau and then do one final normalization
+        tau = self._tau_search(wmin=weights.min().item(), wmax=weights.max().item(), spread=2.0)
+        invE = weights.clamp(min=1e-12)**tau
         weights = invE / invE.mean()
 
         self.weights = weights.to(dtype=torch.float32, device=self.samples.device)
@@ -404,7 +435,7 @@ class CBLoss(torch.nn.Module):
         """
 
         loss = self.loss_fn(logits=logits, targets=targets, mask=mask)
-        
+
         return loss
   
 class ACBLoss(torch.nn.Module):
@@ -505,7 +536,7 @@ class ACBLoss(torch.nn.Module):
         """
         
         loss = self.loss_fn(logits=logits, targets=targets, mask=mask)
-        
+        print(self.weights)
         return loss
 
 class RecallLoss(torch.nn.Module):
