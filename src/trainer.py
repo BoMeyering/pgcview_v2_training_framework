@@ -75,50 +75,73 @@ class FlexMatchTrainer(Trainer):
 
     def __init__(
         self,
-        name,
-        args: argparse.Namespace,
+        name: str,
+        meter_set: MeterSet,
+        tb_writer: SummaryWriter,
+        conf: OmegaConf,
         model: torch.nn.Module,
-        train_loaders,
-        train_length,
-        val_loader,
-        optimizer,
-        criterion,
-        train_samplers=None,
-        scheduler=None,
-        ema=None,
-        tb_logger: SummaryWriter = None,
-        class_map: dict = None,
+        train_loaders: Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader],
+        val_loader: torch.utils.data.DataLoader,
+        train_length: int,
+        criterion: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: Optional[torch.optim.lr_scheduler.LRScheduler]=None,
+        checkpoint_manager: Optional[CheckpointManager]=None,
+        sanity_check: bool=True,
+        ema: Optional[EMA]=None,
     ):
-        super().__init__(name=name)
-        self.trainer_id = "_".join(["fixmatch", str(uuid.uuid4())])
-        self.args = args
+        super().__init__(name=name, meter_set=meter_set, tb_writer=tb_writer)
+        self.trainer_id = "_".join([f"{name}_fixmatch", str(uuid.uuid4())])
+        self.conf = conf
         self.model = model
         self.train_loaders = train_loaders
         self.train_length = train_length
-        self.train_samplers = train_samplers
+        self.train_samplers = train_samplers????
         self.val_loader = val_loader
         self.optimizer = optimizer
         self.criterion = criterion
         self.scheduler = scheduler
         self.ema = ema
         self.logger = logging.getLogger()
-        self.tb_logger = tb_logger
-        self.class_map = class_map
-        self.transforms = get_strong_transforms(resize=args.model.resize)
+        self.sanity_check = sanity_check
+        self.checkpoint_manager = checkpoint_manager
+        self.train_loss_metric = MeanMetric().to(self.conf.device)
+        self.l_train_loss_metric = MeanMetric().to(self.conf.device) # Labeled loss meter
+        self.u_train_loss_metric = MeanMetric().to(self.conf.device) # Unlabeled loss meter
+        self.val_loss_metric = MeanMetric().to(self.conf.device)
+        self.transforms = get_strong_transforms(resize=self.conf.images.resize)
 
-        # setup metrics class
-        self.train_metrics = MetricLogger(
-            num_classes=args.model.num_classes, device=args.device
-        )
-        self.val_metrics = MetricLogger(
-            num_classes=args.model.num_classes, device=args.device
-        )
+        # load in target mapping
+        if self.conf.metadata.target_mapping_path:
+            with open(self.conf.metadata.target_mapping_path, 'r') as f:
+                self.map_dict = json.load(f)
+            map_arr = np.zeros((len(self.map_dict), 3)).astype(np.uint8)
+            for k, v in self.map_dict.items():
+                idx = v['class_idx']
+                map_arr[idx] = v['rgb'][::-1]
 
-        # chkpt_path = Path(self.args.directories.chkpt_dir) / self.args.run_name
-        # self.checkpoint = ModelCheckpoint(filepath=chkpt_path, metadata=vars(self.args))
+            self.class_map = map_arr
 
-    def _train_step(self, batch: Tuple):
-        "Train on one batch of labeled and unlabeled images."
+    def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+        """
+        Train on one batch of labeled and unlabeled images.
+
+        parameters:
+        -----------
+            batch : Tuple[torch.Tensor, torch.Tensor]
+                A tuple containing a batch of labeled images and targets, and a batch of unlabeled images.
+
+        returns:
+        --------
+            total_loss : torch.Tensor
+                The total loss for the batch (labeled + scaled unlabeled).
+            l_loss : torch.Tensor
+                The labeled loss for the batch.
+            scaled_u_loss : torch.Tensor
+                The scaled unlabeled loss for the batch.
+            f : float
+                The fraction of confident pseudo-labels in the unlabeled batch.
+        """
         # Unpack batches
         l_batch, u_batch = batch
         l_img, l_targets = l_batch
@@ -399,31 +422,108 @@ class FlexMatchTrainer(Trainer):
 
         return loss
 
-    def train(self):
-        if self.rank == 0:
-            self.logger.info(
-                f"Training {self.trainer_id} for {self.args.model.epochs} epochs."
-            )
-        for epoch in range(self.args.model.epochs):
+    def _sanity_check(self, epoch):
+        """ Run a sanity check for the model """
+        rank_log(self.conf.is_main, self.logger.info, f"SANITY CHECK {epoch}")
 
-            # Update the epoch in the DistributedSamplers
-            if self.train_samplers is not None:
-                for sampler in self.train_samplers:
-                    sampler.set_epoch(epoch)
+        out_dir = Path(self.conf.directories.output_dir) / self.conf.model_run / "_".join(["epoch", str(epoch)])
+        if self.conf.local_rank == 0:
+            os.makedirs(out_dir)
+            
+        with apply_ema(self.ema):
+            # Set progress bar and unpack batches
+            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='green', disable=not is_main_process())
+
+            # Iterate through the batches
+            with torch.inference_mode():  
+                for batch_idx, batch in p_bar:
+                    if batch_idx % 10 == 0:
+                        # Unpack batch and send to device
+                        img, targets, img_keys = batch
+                        inputs = img.to(self.conf.device, non_blocking=True)
+                        targets = targets.long().to(self.conf.device, non_blocking=True)
+
+                        # Forward pass through model
+                        logits = self.model(inputs)
+
+                        maps = torch.argmax(logits, dim=1)
+
+                        # for i, img in enumerate(maps):
+                        for img_key, img in zip(img_keys, maps):
+                            img = img.detach().cpu().numpy().astype(np.uint8)
+                            if getattr(self, 'map_arr', None) is not None:
+                                img = self.map_arr[img]
+                            else:
+                                img *= 20 # Scale outputs to make class distinction clear
+
+                            cv2.imwrite(str(Path(out_dir) / f"{Path(img_key).stem}_outmap.png"), img)
+                        
+                        # Update the progress bar
+                        p_bar.set_description(
+                            "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
+                                epoch=epoch,
+                                epochs=self.conf.training.epochs,
+                                batch=batch_idx + 1,
+                                iter=len(self.val_loader)
+                            )
+                        )
+
+
+    def _tb_log_metrics(self, metric_dict: dict, main_tag: str, global_step: int, exclude_idx: Optional[List[int]]=None):
+        """ Log metrics from a metric dictionary to TensorBoard """
+        for type, v in metric_dict.items(): # type is 'avg' or 'mc'
+            if type == 'avg':
+                for mk, mv in v.items(): # mk is the metric name, mv is the metric value as a torch.Tensor
+                    self.tb_writer.add_scalar(f"{main_tag}/avg_{mk}", mv.item(), global_step=global_step)
+            elif type == 'mc':
+                metric_map = {data['class_idx']: cname for cname, data in self.map_dict.items()} # Create a mapping from class index (int) to class name (str)
+                for mk, mv in v.items():
+                    scalar_dict = {metric_map.get(i): t.item() for i, t in enumerate(mv) if i not in exclude_idx} # Map the tensor values to a new dict with class names as keys
+                    for sk, sv in scalar_dict.items():
+                        self.tb_writer.add_scalar(f"{main_tag}/{sk}_{mk}", sv, global_step=global_step)
+
+    def train(self):
+        """ Train the model using the FlexMatch algorithm """
+
+        rank_log(self.conf.is_main, self.logger.info, f"Training {self.trainer_id} for {self.conf.training.epochs} epochs.")
+
+        for epoch in range(1, self.conf.training.epochs + 1):
             # Train and validate one epoch
-            train_loss = self._train_epoch(epoch)
+            rank_log(self.conf.is_main, self.logger.info, f"TRAINING EPOCH {epoch}")
+            train_loss, l_loss, u_loss = self._train_epoch(epoch)
+            time.sleep(1)
+            dist.barrier()
+
+            rank_log(self.conf.is_main, self.logger.info, f"VALIDATING EPOCH {epoch}")
             val_loss = self._val_epoch(epoch)
+            time.sleep(1)
+            dist.barrier()
+
+            if self.sanity_check:
+                self._sanity_check(epoch)
+                time.sleep(1)
+                dist.barrier()
+            
+            # Logger Logging
+            rank_log(
+                self.conf.is_main, 
+                self.logger.info,
+                f"Epoch {epoch} - Train Loss: {train_loss:.6f} (Labeled: {l_loss:.6f}, Unlabeled: {u_loss:.6f}) - Val Loss: {val_loss:.6f}"
+            )
 
             logs = {
                 "epoch": epoch,
-                "train_loss": torch.tensor(train_loss[0]),
+                "train_loss": torch.tensor(train_loss),
                 "val_loss": torch.tensor(val_loss),
                 "model_state_dict": self.model.state_dict(),
             }
 
-            # self.logger.info(f"Epoch {logs['epoch'] + 1} Avg Loss, Train Loss: {logs['train_loss'].item()}, Val Loss: {logs['val_loss'].item()}")
-            
-            # self.checkpoint(epoch=epoch, logs=logs)
+            self.checkpoint_manager(logs=logs)
+
+            # Step LR scheduler
+            if self.scheduler:
+                self.scheduler.step()
+
 
 class SupervisedTrainer(Trainer):
     def __init__(
@@ -468,18 +568,6 @@ class SupervisedTrainer(Trainer):
                 map_arr[idx] = v['rgb'][::-1]
 
             self.map_arr = map_arr
-
-        # Set up metrics class
-        self.train_metrics = MetricLogger(
-            name='Train Metrics',
-            num_classes=self.conf.model.config.classes, 
-            device=self.conf.device
-        )
-        self.val_metrics = MetricLogger(
-            name='Validation Metrics',
-            num_classes=self.conf.model.config.classes, 
-            device=self.conf.device
-        )
 
     def _train_step(self, batch: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Train over one batch
@@ -725,6 +813,7 @@ class SupervisedTrainer(Trainer):
                                 iter=len(self.val_loader)
                             )
                         )
+
     def _tb_log_metrics(self, metric_dict: dict, main_tag: str, global_step: int, exclude_idx: Optional[List[int]]=None):
         """ Log metrics from a metric dictionary to TensorBoard """
         for type, v in metric_dict.items(): # type is 'avg' or 'mc'
@@ -737,7 +826,6 @@ class SupervisedTrainer(Trainer):
                     scalar_dict = {metric_map.get(i): t.item() for i, t in enumerate(mv) if i not in exclude_idx} # Map the tensor values to a new dict with class names as keys
                     for sk, sv in scalar_dict.items():
                         self.tb_writer.add_scalar(f"{main_tag}/{sk}_{mk}", sv, global_step=global_step)
-
 
     def train(self):
         """ Train the model """
@@ -757,11 +845,15 @@ class SupervisedTrainer(Trainer):
 
             if self.sanity_check:
                 self._sanity_check(epoch)
+                time.sleep(1)
+                dist.barrier()
 
             # Logger Logging
-            time.sleep(1)
-            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}")
-            dist.barrier()
+            rank_log(
+                self.conf.is_main,
+                self.logger.info, 
+                f"Epoch {epoch} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}"
+            )
 
             logs = {
                 "epoch": epoch,
