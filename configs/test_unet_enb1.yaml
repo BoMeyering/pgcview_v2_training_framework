@@ -1,5 +1,5 @@
 # Training configs
-model_run: model_exp_dlv3_enb1
+model_run: test_unet_enb1
 
 # Computation Device
 device: cuda
@@ -32,7 +32,7 @@ training:
 
 # Model Architecture
 model:
-  architecture: DEEPLABV3
+  architecture: UNET
   config:
     encoder_name: efficientnet-b1
     encoder_depth: 5
@@ -65,6 +65,5 @@ loss:
   smooth: 0.05
 
 # Batch Sizes
-batch_size:
-  labeled: 6
-  unlabeled: 2
+batch_size: 6
+

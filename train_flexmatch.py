@@ -1,5 +1,5 @@
 """
-train_supervised.py
+train_flexmatch.py
 Main training script for the PGCView V2 semantic segmentation model
 BoMeyering 2025
 """
@@ -20,24 +20,26 @@ import torch.distributed as dist
 
 # Local imports
 from src.models import create_smp_model
-from src.datasets import LabeledDataset
-from src.trainer import SupervisedTrainer
+from src.datasets import LabeledDataset, UnlabeledDataset
+from src.flexmatch import class_beta
+from src.trainer import FlexMatchTrainer
+from src.metrics import MetricLogger
 from src.losses import get_loss_criterion, read_class_counts
 from src.parameters import OptimConfig, EMA
-from src.transforms import get_train_transforms, get_val_transforms, set_normalization_values
+from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
 from src.utils.device import set_torch_device
-from src.utils.config import TrainSupervisedConfig, set_run_name
+from src.utils.config import TrainFlexmatchConfig, set_run_name
 from src.utils.loggers import setup_loggers, rank_log
 from src.distributed import set_env_ranks, setup_ddp, shutdown_ddp
 from src.callbacks import CheckpointManager
 
 # Create a parser for command line arguments
 parser = ArgumentParser(
-    prog="train_supervised.py",
-    description="Main training script for the PGCView V2 semantic segmentation model."
+    prog="train_flexmatch.py",
+    description="Main Flexmatch training script for the PGCView V2 semantic segmentation model."
 )
 # Add arguments for config file and then parse CLI args
-parser.add_argument('-c', '--config', type=str, help="The path to the training config YAML file.", default='configs/train_config.yaml')
+parser.add_argument('-c', '--config', type=str, help="The path to the training config YAML file. Defaults to 'configs/train_config.yaml'", default='configs/train_config.yaml')
 parser.add_argument('-b', '--backend', type=str, help="The backend to use for torchrun. Defaults to 'gloo'", default='gloo')
 args = parser.parse_args()
 
@@ -53,7 +55,7 @@ setup_ddp(backend=backend)
 #----------------------------------------#
 # Read in the configuration file and merge with default dict
 yaml_conf = OmegaConf.load(args.config) # Load user supplied config file
-default_conf = OmegaConf.structured(TrainSupervisedConfig) # Load the default config structure - to fill in any missing args
+default_conf = OmegaConf.structured(TrainFlexmatchConfig) # Load the default config structure - to fill in any missing args
 conf = OmegaConf.merge(default_conf, yaml_conf) # Any args in yaml_conf will override defaults
 
 # Set the ranks, world size, and is_main
@@ -90,11 +92,11 @@ else:
 # Main entry point
 #----------------------------------------#
 def main(conf: omegaconf.OmegaConf=conf):
-    """Main function to run the supervised training script
+    """Main function to run the FlexMatch training script
 
-    Run the main training script for supervised training of the PGCView V2 semantic segmentation model.
+    Run the main training script for FlexMatch training of the PGCView V2 semantic segmentation model.
     Pulls in all of the configurations from the provided config file and sets up the model, datasets, dataloaders,
-    optimizer, scheduler, and criterion. Then initializes the SupervisedTrainer class and starts training.
+    optimizer, scheduler, and criterion. Then initializes the FlexMatchTrainer class and starts training.
 
     Parameters:
     -----------
@@ -122,107 +124,116 @@ def main(conf: omegaconf.OmegaConf=conf):
 
     # Augmentation Pipelines
     train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
+    weak_transforms = get_weak_transforms(resize=tuple(conf.images.resize))
+    strong_transforms = get_strong_transforms(resize=tuple(conf.images.resize))
     val_transforms = get_val_transforms(resize=tuple(conf.images.resize))
     test_transforms = get_val_transforms(resize=tuple(conf.images.resize))
 
-    # Create Datasets
-    train_ds = LabeledDataset(
-        root_dir=conf.directories.train_dir,
-        transforms=train_transforms
-    )
-
-    val_ds = LabeledDataset(
-        root_dir=conf.directories.val_dir,
-        transforms=val_transforms
-    )
-
-    # test_ds = LabeledDataset(
-    #     root_dir=conf.directories.test_dir,
-    #     transforms=test_transforms
+    # # Create Datasets
+    # train_ds = LabeledDataset(
+    #     root_dir=conf.directories.train_labeled_dir,
+    #     transforms=train_transforms
     # )
 
-    # Create distributed Samplers
-    train_sampler = DistributedSampler(
-        dataset=train_ds, 
-        rank=conf.local_rank, 
-        shuffle=True, 
-        drop_last=True
-    )
-    val_sampler = DistributedSampler(
-        dataset=val_ds, 
-        rank=conf.local_rank, 
-        shuffle=False, 
-        drop_last=True
-    )
-    # test_sampler = DistributedSampler(
-    #     dataset=test_ds, 
+    # val_ds = LabeledDataset(
+    #     root_dir=conf.directories.val_dir,
+    #     transforms=val_transforms
+    # )
+
+    # # test_ds = LabeledDataset(
+    # #     root_dir=conf.directories.test_dir,
+    # #     transforms=test_transforms
+    # # )
+
+    # # Create distributed Samplers
+    # train_sampler = DistributedSampler(
+    #     dataset=train_ds, 
+    #     rank=conf.local_rank, 
+    #     shuffle=True, 
+    #     drop_last=True
+    # )
+    # val_sampler = DistributedSampler(
+    #     dataset=val_ds, 
     #     rank=conf.local_rank, 
     #     shuffle=False, 
-    #     drop_last=False
+    #     drop_last=True
     # )
+    # # test_sampler = DistributedSampler(
+    # #     dataset=test_ds, 
+    # #     rank=conf.local_rank, 
+    # #     shuffle=False, 
+    # #     drop_last=False
+    # # )
     
-    # Create DataLoaders
-    train_loader = DataLoader(
-        dataset=train_ds, 
-        batch_size=conf.batch_size,
-        # batch_size=6,
-        shuffle=False,
-        sampler=train_sampler,
-        drop_last=True
-    )
-    val_loader = DataLoader(
-        dataset=val_ds, 
-        batch_size=conf.batch_size,
-        # batch_size=6,
-        shuffle=False,
-        sampler=val_sampler,
-        drop_last=True
-    )
-    # test_loader = DataLoader(
-    #     dataset=test_ds, 
+    # # Create DataLoaders
+    # train_loader = DataLoader(
+    #     dataset=train_ds, 
     #     batch_size=conf.batch_size.labeled, 
+    #     # batch_size=6,
     #     shuffle=False,
-    #     sampler=test_sampler
+    #     sampler=train_sampler,
+    #     drop_last=True
+    # )
+    # val_loader = DataLoader(
+    #     dataset=val_ds, 
+    #     batch_size=conf.batch_size.labeled,
+    #     # batch_size=6,
+    #     shuffle=False,
+    #     sampler=val_sampler,
+    #     drop_last=True
+    # )
+    # # test_loader = DataLoader(
+    # #     dataset=test_ds, 
+    # #     batch_size=conf.batch_size.labeled, 
+    # #     shuffle=False,
+    # #     sampler=test_sampler
+    # # )
+
+    # # Optimizer
+    # optim_config = OptimConfig(conf=conf, model=model)
+    # model, optimizer, scheduler = optim_config.process()
+    
+    # # Criterion
+    # criterion = get_loss_criterion(conf)
+    # rank_log(conf.is_main, logger.info, f"Instantiated loss criterion {type(criterion)}")
+
+    # # Initialize EMA if specified
+    # if conf.optimizer.ema:
+    #     ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
+    #     rank_log(conf.is_main, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
+    # else:
+    #     ema = None
+
+    # # Create MeterSet
+    # meters = MeterSet({
+    #     'train_loss_smooth': RunningAvgMeter(window_length=15),
+    #     'val_loss_smooth': RunningAvgMeter(window_length=15)
+    # })
+
+    # # Create checkpoint manager
+    # checkpoint_manager = CheckpointManager(
+    #     conf=conf
     # )
 
-    # Optimizer
-    optim_config = OptimConfig(conf=conf, model=model)
-    model, optimizer, scheduler = optim_config.process()
-    
-    # Criterion
-    criterion = get_loss_criterion(conf)
-    rank_log(conf.is_main, logger.info, f"Instantiated loss criterion {type(criterion)}")
+    # # Initialize Trainer
+    # supervised_trainer = SupervisedTrainer(
+    #     name="my supervised trainer",
+    #     meter_set=meters,
+    #     tb_writer=tb_writer,
+    #     conf=conf, 
+    #     model=model, 
+    #     train_loader=train_loader, 
+    #     val_loader=val_loader,
+    #     criterion=criterion,
+    #     optimizer=optimizer,
+    #     scheduler=scheduler,
+    #     checkpoint_manager=checkpoint_manager,
+    #     ema=ema)
 
-    # Initialize EMA if specified
-    if conf.optimizer.ema:
-        ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
-        rank_log(conf.is_main, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
-    else:
-        ema = None
+    # # Start training
+    # supervised_trainer.train()
 
-    # Create checkpoint manager
-    checkpoint_manager = CheckpointManager(
-        conf=conf
-    )
-
-    # Initialize Trainer
-    supervised_trainer = SupervisedTrainer(
-        name="my supervised trainer",
-        tb_writer=tb_writer,
-        conf=conf, 
-        model=model, 
-        train_loader=train_loader, 
-        val_loader=val_loader,
-        criterion=criterion,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        checkpoint_manager=checkpoint_manager,
-        ema=ema)
-
-    # Start training
-    supervised_trainer.train()
-
-    shutdown_ddp()
+    # shutdown_ddp()
 
 if __name__ == '__main__':
     main()

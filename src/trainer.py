@@ -69,13 +69,13 @@ class Trainer(ABC):
         """Implement the whole training loop"""
         ...
 
+
 class FlexMatchTrainer(Trainer):
     """Trainer Class for FlexMatch Algorithm"""
 
     def __init__(
         self,
         name: str,
-        meter_set: MeterSet,
         tb_writer: SummaryWriter,
         conf: OmegaConf,
         model: torch.nn.Module,
@@ -95,7 +95,7 @@ class FlexMatchTrainer(Trainer):
         self.model = model
         self.train_loaders = train_loaders
         self.train_length = train_length
-        self.train_samplers = train_samplers????
+        # self.train_samplers = train_samplers????
         self.val_loader = val_loader
         self.optimizer = optimizer
         self.criterion = criterion
@@ -108,6 +108,7 @@ class FlexMatchTrainer(Trainer):
         self.l_train_loss_meter = MeanMetric().to(self.conf.device) # Labeled loss meter
         self.u_train_loss_meter = MeanMetric().to(self.conf.device) # Unlabeled loss meter
         self.val_loss_meter = MeanMetric().to(self.conf.device) # Validation loss meter
+        self.f_loss_meter = MeanMetric().to(self.conf.device) # Fraction of confident pseudolabels meter
         self.transforms = get_strong_transforms(resize=self.conf.images.resize)
 
         # load in target mapping
@@ -238,6 +239,7 @@ class FlexMatchTrainer(Trainer):
         self.train_loss_meter.reset()
         self.u_train_loss_meter.reset()
         self.l_train_loss_meter.reset()
+        self.f_loss_meter.reset()
         
         # Reinstantiate iterator loaders
         train_l_loader, train_u_loader = self.train_loaders
@@ -271,6 +273,7 @@ class FlexMatchTrainer(Trainer):
             self.train_loss_meter.update(loss.detach(), weight=torch.sum(batch[0].size(0) + batch[1].size(0)))
             self.l_train_loss_meter.update(l_loss.detach(), weight=batch[0].size(0))
             self.u_train_loss_meter.update(u_loss.detach(), weight=batch[1].size(0))
+            self.f_loss_meter.update(torch.tensor(f, device=self.conf.device), weight=batch[1].size(0))
 
             # Step optimizer and update parameters for EMA
             self.optimizer.step()
@@ -286,7 +289,7 @@ class FlexMatchTrainer(Trainer):
                     batch=batch_idx + 1,
                     iter=self.train_length,
                     lr=self.scheduler.get_last_lr()[0],
-                    loss=loss.item()
+                    loss=loss.item(),
                     f=f,
                 )
             )
@@ -304,6 +307,9 @@ class FlexMatchTrainer(Trainer):
                 self.tb_writer.add_scalar(
                     tag="batch_loss/train_unlabeled", scalar_value=u_loss.item(), global_step=batch_step
                 )
+                self.tb_writer.add_scalar(
+                    tag="batch_loss/fraction_confident", scalar_value=f, global_step=batch_step
+                )
 
         # ddp barrier
         dist.barrier()
@@ -312,6 +318,7 @@ class FlexMatchTrainer(Trainer):
         avg_loss = self.train_loss_meter.compute().item()
         avg_l_loss = self.l_train_loss_meter.compute().item()
         avg_u_loss = self.u_train_loss_meter.compute().item()
+        avg_f = self.f_loss_meter.compute().item()
 
         # Compute epoch metrics and loss
         self.train_metrics.compute()
@@ -327,6 +334,9 @@ class FlexMatchTrainer(Trainer):
             )
             self.tb_writer.add_scalar(
                 tag="epoch_loss/train_unlabeled", scalar_value=avg_u_loss, global_step=epoch
+            )
+            self.tb_writer.add_scalar(
+                tag="epoch_fraction_confident", scalar_value=avg_f, global_step=epoch
             )
             self._tb_log_metrics(
                 self.train_metrics.results, 
@@ -532,7 +542,6 @@ class SupervisedTrainer(Trainer):
     def __init__(
         self,
         name: str,
-        meter_set: MeterSet,
         tb_writer: SummaryWriter,
         conf: OmegaConf,
         model: torch.nn.Module,

@@ -1,5 +1,5 @@
 # Training configs
-model_run: flexmatch_segformer_enb1_tvmfdiceloss_k=16
+model_run: test_flexmatch_segformer_enb1_tvmfdiceloss_k=16
 
 # Computation Device
 device: cuda
@@ -66,13 +66,10 @@ loss:
   smooth: 0.05
   kappa: 16
 
-# Batch Sizes
-batch_size:
-  labeled: 5
-  unlabeled: 2
-
 # Flexmatch
 flexmatch:
   tau: 0.95
   mapping: linear
   warmup: True
+  l_batch_size: 2
+  u_batch_size: 4
