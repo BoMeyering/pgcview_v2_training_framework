@@ -90,6 +90,7 @@ class FlexMatch:
     tau: float=0.95
     mapping: str="linear"
     warmup: bool=True
+    lam: float=1.0
 
 @dataclass
 class SMPModelConfig:

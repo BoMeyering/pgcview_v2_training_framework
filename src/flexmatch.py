@@ -5,7 +5,6 @@ BoMeyering 2025
 """
 
 import torch
-import torch.functional as F
 from omegaconf import OmegaConf
 from typing import Tuple
 
@@ -108,7 +107,7 @@ def get_pseudo_labels(tau_vector: torch.Tensor, logits: torch.Tensor) -> Tuple[t
     if len(logits.shape) != 4:
         raise ValueError(f"Argument 'logits' should be of shape (N, C, H, W), but has {len(logits.shape)} instead")
     
-    probs = F.softmax(logits, dim=1)
+    probs = torch.softmax(logits, dim=1)
     max_probs, pseudo_labels = torch.max(probs, dim=1)
 
     # Create an NxHxW tensor of the correct tau per pixel and then create a boolean mask
