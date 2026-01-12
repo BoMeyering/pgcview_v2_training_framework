@@ -10,17 +10,22 @@ import logging
 import argparse
 import omegaconf
 import torch.distributed as dist
+import collections
+import typing
 from argparse import ArgumentParser
 from pathlib import Path
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, DictConfig, ListConfig
+from omegaconf.base import ContainerMetadata
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 import torch.distributed as dist
 
 # Local imports
+import src
 from src.models import create_smp_model
 from src.datasets import LabeledDataset, UnlabeledDataset
+from src.dataloaders import DistributedDataLoaderBalancer
 from src.flexmatch import class_beta
 from src.trainer import FlexMatchTrainer
 from src.metrics import MetricLogger
@@ -129,111 +134,110 @@ def main(conf: omegaconf.OmegaConf=conf):
     val_transforms = get_val_transforms(resize=tuple(conf.images.resize))
     test_transforms = get_val_transforms(resize=tuple(conf.images.resize))
 
-    # # Create Datasets
-    # train_ds = LabeledDataset(
-    #     root_dir=conf.directories.train_labeled_dir,
-    #     transforms=train_transforms
+    # Create Datasets
+    train_l_ds = LabeledDataset(
+        root_dir=conf.directories.train_labeled_dir,
+        transforms=train_transforms
+    )
+
+    train_u_ds = UnlabeledDataset(
+        root_dir=conf.directories.train_unlabeled_dir,
+        weak_transforms=weak_transforms
+    )
+
+    val_ds = LabeledDataset(
+        root_dir=conf.directories.val_dir,
+        transforms=val_transforms
+    )
+
+    # test_ds = LabeledDataset(
+    #     root_dir=conf.directories.test_dir,
+    #     transforms=test_transforms
     # )
 
-    # val_ds = LabeledDataset(
-    #     root_dir=conf.directories.val_dir,
-    #     transforms=val_transforms
-    # )
+    # Create balanced DDP ready dataloaders
+    dataloader_balancer = DistributedDataLoaderBalancer(
+        datasets=[train_l_ds, train_u_ds],
+        batch_sizes=[conf.flexmatch.l_batch_size, conf.flexmatch.u_batch_size],
+        num_replicas=conf.world_size,
+        rank=conf.local_rank,
+        shuffle=True,
+        drop_last=True
+    )
 
-    # # test_ds = LabeledDataset(
-    # #     root_dir=conf.directories.test_dir,
-    # #     transforms=test_transforms
-    # # )
+    balanced_dataloaders = dataloader_balancer.balance_loaders()
+    train_loaders = balanced_dataloaders.dataloaders
 
-    # # Create distributed Samplers
-    # train_sampler = DistributedSampler(
-    #     dataset=train_ds, 
-    #     rank=conf.local_rank, 
-    #     shuffle=True, 
-    #     drop_last=True
-    # )
-    # val_sampler = DistributedSampler(
-    #     dataset=val_ds, 
-    #     rank=conf.local_rank, 
-    #     shuffle=False, 
-    #     drop_last=True
-    # )
-    # # test_sampler = DistributedSampler(
-    # #     dataset=test_ds, 
-    # #     rank=conf.local_rank, 
-    # #     shuffle=False, 
-    # #     drop_last=False
-    # # )
+    val_sampler = DistributedSampler(
+        dataset=val_ds, 
+        rank=conf.local_rank, 
+        shuffle=False, 
+        drop_last=True
+    )
+    val_loader = DataLoader(
+        dataset=val_ds, 
+        batch_size=conf.flexmatch.l_batch_size,
+        shuffle=False,
+        sampler=val_sampler,
+        drop_last=True,
+        num_workers=6
+    )
+
+    # Optimizer
+    optim_config = OptimConfig(conf=conf, model=model)
+    model, optimizer, scheduler = optim_config.process()
     
-    # # Create DataLoaders
-    # train_loader = DataLoader(
-    #     dataset=train_ds, 
-    #     batch_size=conf.batch_size.labeled, 
-    #     # batch_size=6,
-    #     shuffle=False,
-    #     sampler=train_sampler,
-    #     drop_last=True
-    # )
-    # val_loader = DataLoader(
-    #     dataset=val_ds, 
-    #     batch_size=conf.batch_size.labeled,
-    #     # batch_size=6,
-    #     shuffle=False,
-    #     sampler=val_sampler,
-    #     drop_last=True
-    # )
-    # # test_loader = DataLoader(
-    # #     dataset=test_ds, 
-    # #     batch_size=conf.batch_size.labeled, 
-    # #     shuffle=False,
-    # #     sampler=test_sampler
-    # # )
+    # Criterion
+    criterion = get_loss_criterion(conf)
+    rank_log(conf.is_main, logger.info, f"Instantiated loss criterion {type(criterion)}")
 
-    # # Optimizer
-    # optim_config = OptimConfig(conf=conf, model=model)
-    # model, optimizer, scheduler = optim_config.process()
-    
-    # # Criterion
-    # criterion = get_loss_criterion(conf)
-    # rank_log(conf.is_main, logger.info, f"Instantiated loss criterion {type(criterion)}")
+    # Initialize EMA if specified
+    if conf.optimizer.ema:
+        ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
+        rank_log(conf.is_main, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
+    else:
+        ema = None
 
-    # # Initialize EMA if specified
-    # if conf.optimizer.ema:
-    #     ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
-    #     rank_log(conf.is_main, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
-    # else:
-    #     ema = None
+    # Reload model weights if specified
+    if conf.directories.starting_checkpoint_path is not None:
+        if os.path.exists(conf.directories.starting_checkpoint_path):
+            rank_log(conf.is_main, logger.info, f"Loading starting checkpoint from {conf.directories.starting_checkpoint_path}")
+            
+            checkpoint = torch.load(conf.directories.starting_checkpoint_path, map_location='cpu', weights_only=False) # Load to CPU first to avoid collision with EMA weights
+            if 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+            if ema is not None and 'ema_state_dict' in checkpoint:
+                ema.shadow_params = checkpoint['ema_state_dict']
+                rank_log(conf.is_main, logger.info, f"Loaded EMA state dict from starting checkpoint.")
+            rank_log(conf.is_main, logger.info, f"Successfully loaded model state dict from starting checkpoint.")
+        else:
+            rank_log(conf.is_main, logger.warning, f"Starting checkpoint path {conf.directories.starting_checkpoint_path} does not exist. Continuing with randomly initialized weights.")
 
-    # # Create MeterSet
-    # meters = MeterSet({
-    #     'train_loss_smooth': RunningAvgMeter(window_length=15),
-    #     'val_loss_smooth': RunningAvgMeter(window_length=15)
-    # })
+    # Create checkpoint manager
+    checkpoint_manager = CheckpointManager(
+        conf=conf
+    )
 
-    # # Create checkpoint manager
-    # checkpoint_manager = CheckpointManager(
-    #     conf=conf
-    # )
+    # Initialize FlexMatchTrainer
+    flexmatch_trainer = FlexMatchTrainer(
+        name="flexmatch_trainer", 
+        tb_writer=tb_writer,
+        conf=conf, 
+        model=model,
+        train_loaders=train_loaders,
+        val_loader=val_loader,
+        train_length=balanced_dataloaders.steps_per_epoch,
+        criterion=criterion,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        checkpoint_manager=checkpoint_manager,
+        ema=ema
+    )
 
-    # # Initialize Trainer
-    # supervised_trainer = SupervisedTrainer(
-    #     name="my supervised trainer",
-    #     meter_set=meters,
-    #     tb_writer=tb_writer,
-    #     conf=conf, 
-    #     model=model, 
-    #     train_loader=train_loader, 
-    #     val_loader=val_loader,
-    #     criterion=criterion,
-    #     optimizer=optimizer,
-    #     scheduler=scheduler,
-    #     checkpoint_manager=checkpoint_manager,
-    #     ema=ema)
+    # Start training
+    flexmatch_trainer.train()
 
-    # # Start training
-    # supervised_trainer.train()
-
-    # shutdown_ddp()
+    shutdown_ddp()
 
 if __name__ == '__main__':
     main()

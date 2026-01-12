@@ -90,12 +90,11 @@ class FlexMatchTrainer(Trainer):
         ema: Optional[EMA]=None,
     ):
         super().__init__(name=name, tb_writer=tb_writer)
-        self.trainer_id = "_".join([f"{name}_fixmatch", str(uuid.uuid4())])
+        self.trainer_id = "_".join([name, str(uuid.uuid4())])
         self.conf = conf
         self.model = model
         self.train_loaders = train_loaders
         self.train_length = train_length
-        # self.train_samplers = train_samplers????
         self.val_loader = val_loader
         self.optimizer = optimizer
         self.criterion = criterion
@@ -120,7 +119,7 @@ class FlexMatchTrainer(Trainer):
                 idx = v['class_idx']
                 map_arr[idx] = v['rgb'][::-1]
 
-            self.class_map = map_arr
+            self.map_arr = map_arr
 
         # Set up metrics class
         self.train_metrics = MetricLogger(
@@ -156,8 +155,8 @@ class FlexMatchTrainer(Trainer):
         """
         # Unpack batches
         l_batch, u_batch = batch
-        l_img, l_targets = l_batch
-        weak_img = u_batch
+        l_img, l_targets, _ = l_batch
+        weak_img, _ = u_batch
 
         # Put labeled image and targets on device
         l_img = l_img.to(self.conf.device)
@@ -169,13 +168,14 @@ class FlexMatchTrainer(Trainer):
             weak_logits = self.model(weak_inputs)
 
         # Pseudo-label the unlabled images (calculated in @torch.no_grad() context)
-        beta_c = class_beta(
-            weak_logits, 
-            tau=self.flexmatch.tau,
-            mapping=self.flexmatch.mapping,
-            warmup=self.flexmatch.warmup
-        )
-        tau_vec = beta_c * self.flexmatch.tau
+        # beta_c = class_beta(
+        #     weak_logits, 
+        #     tau=self.conf.flexmatch.tau,
+        #     mapping=self.conf.flexmatch.mapping,
+        #     warmup=self.conf.flexmatch.warmup
+        # )
+        # tau_vec = beta_c * self.conf.flexmatch.tau
+        tau_vec = torch.tensor(self.conf.flexmatch.tau).repeat(12).to(self.conf.device)  # Temporary fix for tau vector issue
 
         weak_targets, weak_mask = get_pseudo_labels(tau_vec, weak_logits)
 
@@ -225,7 +225,7 @@ class FlexMatchTrainer(Trainer):
         total_loss = l_loss + scaled_u_loss
 
         # Get the class predictions
-        preds = torch.argmax(l_logits, dim=1).to(self.args.device)
+        preds = torch.argmax(l_logits, dim=1).to(self.conf.device)
 
         # Update metrics
         self.train_metrics.update(preds=preds, targets=l_targets)
@@ -270,10 +270,14 @@ class FlexMatchTrainer(Trainer):
             loss.backward()
 
             # Add training losses to MeanMetrics (for unified validation loss over all ranks in DDP)
-            self.train_loss_meter.update(loss.detach(), weight=torch.sum(batch[0].size(0) + batch[1].size(0)))
-            self.l_train_loss_meter.update(l_loss.detach(), weight=batch[0].size(0))
-            self.u_train_loss_meter.update(u_loss.detach(), weight=batch[1].size(0))
-            self.f_loss_meter.update(torch.tensor(f, device=self.conf.device), weight=batch[1].size(0))
+            l_size = batch[0][0].size(0)
+            u_size = batch[1][0].size(0)
+            total_size = l_size + u_size
+
+            self.train_loss_meter.update(loss.detach(), weight=total_size)
+            self.l_train_loss_meter.update(l_loss.detach(), weight=l_size)
+            self.u_train_loss_meter.update(u_loss.detach(), weight=u_size)
+            self.f_loss_meter.update(torch.tensor(f, device=self.conf.device), weight=u_size)
 
             # Step optimizer and update parameters for EMA
             self.optimizer.step()
@@ -296,7 +300,7 @@ class FlexMatchTrainer(Trainer):
             # p_bar.update()
 
             # Tensorboard batch writing
-            batch_step = ((epoch-1) * len(self.train_length)) + batch_idx
+            batch_step = ((epoch-1) * self.train_length) + batch_idx
             if dist.get_rank() == 0:
                 self.tb_writer.add_scalar(
                     tag="batch_loss/train", scalar_value=loss.item(), global_step=batch_step
@@ -352,7 +356,7 @@ class FlexMatchTrainer(Trainer):
         """ Validate over one batch """
 
         # Unpack batch and send to device
-        img, targets, img_keys = batch
+        img, targets, _ = batch
         inputs = img.float().to(self.conf.device, non_blocking=True)
         targets = targets.long().to(self.conf.device, non_blocking=True)
 
@@ -522,6 +526,10 @@ class FlexMatchTrainer(Trainer):
                 f"Epoch {epoch} - Train Loss: {train_loss:.6f} (Labeled: {l_loss:.6f}, Unlabeled: {u_loss:.6f}) - Val Loss: {val_loss:.6f}"
             )
 
+            with apply_ema(self.ema):
+                # Create checkpoint logs
+                ema_state_dict = self.model.state_dict()
+
             logs = {
                 "epoch": epoch,
                 "train_loss": torch.tensor(train_loss),
@@ -529,6 +537,7 @@ class FlexMatchTrainer(Trainer):
                 "train_unlabeled_loss": torch.tensor(u_loss),
                 "val_loss": torch.tensor(val_loss),
                 "model_state_dict": self.model.state_dict(),
+                "ema_state_dict": ema_state_dict,
             }
 
             self.checkpoint_manager(logs=logs)

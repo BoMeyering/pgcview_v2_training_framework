@@ -65,6 +65,7 @@ loss:
   smooth: 0.05
 
 # Batch Sizes
-batch_size:
-  labeled: 6
-  unlabeled: 2
+batch_size: 6
+
+# Multi-processing
+num_workers: 6

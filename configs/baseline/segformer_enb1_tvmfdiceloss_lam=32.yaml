@@ -18,8 +18,7 @@ tb_exclude_classes: [8, 9, 10, 11]
 
 # Directories
 directories:
-  train_labeled_dir: data/processed/train/labeled
-  train_unlabeled_dir: data/processed/train/unlabeled
+  train_dir: data/processed/train/labeled
   val_dir: data/processed/val
   test_dir: data/processed/test
   output_dir: outputs
@@ -28,7 +27,7 @@ directories:
 
 # Training
 training:
-  epochs: 200
+  epochs: 300
   sanity_check: True
 
 # Model Architecture
@@ -67,12 +66,7 @@ loss:
   lambda_k: 32.0
 
 # Batch Sizes
-batch_size:
-  labeled: 5
-  unlabeled: 2
+batch_size: 6
 
-# Flexmatch
-flexmatch:
-  tau: 0.95
-  mapping: linear
-  warmup: True
+# Multi-processing
+num_workers: 6

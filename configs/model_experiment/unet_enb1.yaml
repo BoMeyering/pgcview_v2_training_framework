@@ -67,3 +67,6 @@ loss:
 # Batch Sizes
 batch_size: 6
 
+# Multi-processing
+num_workers: 6
+

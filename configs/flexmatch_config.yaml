@@ -1,5 +1,5 @@
 # Training configs
-model_run: test_flexmatch_segformer_enb1_tvmfdiceloss_k=16
+model_run: flexmatch_no_baseline_lam=0.5_segformer_enb1_tvmfdiceloss_k=16
 
 # Computation Device
 device: cuda
@@ -25,6 +25,7 @@ directories:
   output_dir: outputs
   checkpoint_dir: model_checkpoints
   log_dir: logs/run_logs
+  starting_checkpoint_path: model_checkpoints/baseline_segformer_enb1_tvmfdiceloss_k=16_2025-12-25_13.12.16/baseline_segformer_enb1_tvmfdiceloss_k=16_2025-12-25_13.12.16_latest_epoch_200_vloss-1.319348.pth
 
 # Training
 training:
@@ -47,9 +48,9 @@ optimizer:
   weight_decay: 0.001
   filter_bias_and_bn: True
   ema: True
-  ema_decay: 0.9
+  ema_decay: 0.99
   optimizer_params: 
-    lr: 0.003
+    lr: 0.001
     momentum: 0.9
     nesterov: True
     gamma: 0.99
@@ -73,3 +74,4 @@ flexmatch:
   warmup: True
   l_batch_size: 2
   u_batch_size: 4
+  lam: 0.3

@@ -13,6 +13,12 @@ from omegaconf import OmegaConf
 from enum import Enum
 from typing import List, Optional, Union, Tuple
 
+# TO REMOVE WHEN NO LONGER NEEDED!
+@dataclass
+class BatchSize:
+    labeled: int=2
+    unlabeled: int=2
+
 
 class ModelArchitecture(Enum):
     """
@@ -181,6 +187,7 @@ class TrainSupervisedConfig:
     scheduler: Scheduler=field(default_factory=Scheduler)
     loss: Loss=field(default_factory=Loss)
     batch_size: int=2
+    num_workers: int=2
 
 @dataclass
 class TrainFlexmatchConfig:
@@ -201,6 +208,7 @@ class TrainFlexmatchConfig:
     scheduler: Scheduler=field(default_factory=Scheduler)
     loss: Loss=field(default_factory=Loss)
     flexmatch: FlexMatch=field(default_factory=FlexMatch)
+    num_workers: int=2
 
 
 def set_run_name(conf: OmegaConf):

@@ -66,10 +66,6 @@ def class_beta(logits: torch.Tensor, tau: float=0.85, mapping: str='linear', war
         sigma_t = torch.bincount(masked_preds, minlength=num_classes)
 
         # Create normalized beta_t vector
-        print("Sigmat t: ", sigma_t)
-        print("Sigma_t:", sigma_t.max())
-        print("SIgma_t sum:", sigma_t.sum())
-        print("N - sum(sigma_t):", N - sigma_t.sum())
         if warmup:
             beta_t = sigma_t / torch.max(torch.tensor([sigma_t.max(), N - sigma_t.sum()]))
         else:     
@@ -81,6 +77,7 @@ def class_beta(logits: torch.Tensor, tau: float=0.85, mapping: str='linear', war
         elif mapping == 'concave':
             beta_t = torch.log(beta_t + 1) / torch.log(2)
 
+        print(beta_t)
         return beta_t
 
     except Exception as e:
@@ -106,6 +103,8 @@ def get_pseudo_labels(tau_vector: torch.Tensor, logits: torch.Tensor) -> Tuple[t
     
     if len(logits.shape) != 4:
         raise ValueError(f"Argument 'logits' should be of shape (N, C, H, W), but has {len(logits.shape)} instead")
+
+    
     
     probs = torch.softmax(logits, dim=1)
     max_probs, pseudo_labels = torch.max(probs, dim=1)
