@@ -758,7 +758,7 @@ class TverskyLoss(torch.nn.Module):
         self.alpha = alpha
         self.beta = beta
         self.reduction = reduction
-        self.eps = 1.0
+        self.eps = 1e-8
     
     def forward(self, logits: torch.Tensor, targets: torch.Tensor, mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
         """Forward method of TverskyLoss.
@@ -778,9 +778,9 @@ class TverskyLoss(torch.nn.Module):
                 A scalar loss value if reduction is 'mean' or 'sum', else a loss tensor of shape (N, H, W).
         """
         # Get probabilities from logits and convert targets to one-hot
-        probs = torch.softmax(logits, dim=1).clamp(min=self.eps, max=1-self.eps) # Clamp the logits in the inverval [self.eps, 1-self.eps]
+        probs = torch.softmax(logits, dim=1)
+
         targets_one_hot = F.one_hot(targets, num_classes=probs.shape[1]).movedim(-1, 1).float()
-        reduce_dims = tuple(d for d in range(probs.ndim) if d not in (1,))
         
         if mask is not None:
             mask = mask.unsqueeze(1)
@@ -788,6 +788,7 @@ class TverskyLoss(torch.nn.Module):
             targets_one_hot = targets_one_hot * mask
 
         # Calculate true positives, false negatives, and false positives based on the softmax probabilities
+        reduce_dims = (0, 2, 3)
         true_pos = (probs * targets_one_hot).sum(dim=reduce_dims)
         false_neg = ((1 - probs) * targets_one_hot).sum(dim=reduce_dims)
         false_pos = (probs * (1 - targets_one_hot)).sum(dim=reduce_dims)

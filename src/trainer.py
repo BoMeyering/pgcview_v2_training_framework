@@ -528,19 +528,16 @@ class FlexMatchTrainer(Trainer):
 
             with apply_ema(self.ema):
                 # Create checkpoint logs
-                ema_state_dict = self.model.state_dict()
+                ema_state_dict = self.model.module.state_dict()
 
-            logs = {
+            chkpt_logs = {
                 "epoch": epoch,
-                "train_loss": torch.tensor(train_loss),
-                "train_labeled_loss": torch.tensor(l_loss),
-                "train_unlabeled_loss": torch.tensor(u_loss),
                 "val_loss": torch.tensor(val_loss),
-                "model_state_dict": self.model.state_dict(),
+                "model_state_dict": self.model.module.state_dict(),
                 "ema_state_dict": ema_state_dict,
             }
 
-            self.checkpoint_manager(logs=logs)
+            self.checkpoint_manager(logs=chkpt_logs)
 
             # Step LR scheduler
             if self.scheduler:
@@ -880,14 +877,18 @@ class SupervisedTrainer(Trainer):
                 f"Epoch {epoch} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}"
             )
 
-            logs = {
+            with apply_ema(self.ema):
+                # Create checkpoint logs
+                ema_state_dict = self.model.module.state_dict()
+
+            chkpt_logs = {
                 "epoch": epoch,
-                "train_loss": torch.tensor(train_loss),
                 "val_loss": torch.tensor(val_loss),
-                "model_state_dict": self.model.state_dict(),
+                "model_state_dict": self.model.module.state_dict(),
+                "ema_state_dict": ema_state_dict,
             }
 
-            self.checkpoint_manager(logs=logs)
+            self.checkpoint_manager(logs=chkpt_logs)
 
             # Step LR scheduler
             if self.scheduler:

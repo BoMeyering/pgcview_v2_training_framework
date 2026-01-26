@@ -31,8 +31,10 @@ class CheckpointManager:
                 os.makedirs(self.checkpoint_sub_dir, exist_ok=True)
 
     def __call__(self, logs=None):
-        current = logs.get(self.monitor)
-        epoch = logs.get('epoch')
+        """ Call the CheckpointManager to potentially save a checkpoint based on monitored metric. """
+        current = logs.pop(self.monitor, None)
+        epoch = logs.pop('epoch', None)
+
         if current is None:
             rank_log(self.conf.is_main, self.logger.warning, f"Warning: Metric '{self.monitor}' is not available. Skipping checkpoint.")
             return None
@@ -52,15 +54,15 @@ class CheckpointManager:
             chkpt_filename = self.checkpoint_sub_dir / f"{self.model_run_name}_latest_epoch_{epoch}_vloss-{current:.6f}.pth"
 
             # Form the checkpoint dict
-            chkpt = {
-                'model_state_dict': logs.get('model_state_dict'),
-                'ema_state_dict': logs.get('ema_state_dict'),
-            }
+            # chkpt = {
+            #     'model_state_dict': logs.get('model_state_dict'),
+            #     'ema_state_dict': logs.get('ema_state_dict'),
+            # }
 
-            torch.save(chkpt, chkpt_filename)
+            torch.save(logs, chkpt_filename)
+            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} checkpoint saved as most recent checkpoint. Saved to {chkpt_filename}")
 
             self.most_recent_checkpoint.append((epoch, chkpt_filename))
-            rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} checkpoint saved as most recent checkpoint. Saved to {chkpt_filename}")
 
         # If we don't have enough checkpoints yet or current is better than the worst of top_k
         should_save = len(self.top_checkpoints) < self.top_k or self.monitor_op(current, self.top_checkpoints[-1][0])
@@ -68,12 +70,12 @@ class CheckpointManager:
             chkpt_filename = self.checkpoint_sub_dir / f"{self.model_run_name}_epoch_{epoch}_vloss-{current:.6f}.pth"
 
             # Form the checkpoint dict
-            chkpt = {
-                'model_state_dict': logs.get('model_state_dict'),
-                'ema_state_dict': logs.get('ema_state_dict'),
-            }
+            # chkpt = {
+            #     'model_state_dict': logs.get('model_state_dict'),
+            #     'ema_state_dict': logs.get('ema_state_dict'),
+            # }
 
-            torch.save(chkpt, chkpt_filename)
+            torch.save(logs, chkpt_filename)
             rank_log(self.conf.is_main, self.logger.info, f"Epoch {epoch} - '{self.monitor}' improved or is in top-{self.top_k}. Saved to {chkpt_filename}")
 
             self.top_checkpoints.append((current, chkpt_filename))
