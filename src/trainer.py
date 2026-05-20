@@ -530,9 +530,12 @@ class FlexMatchTrainer(Trainer):
                 # Create checkpoint logs
                 ema_state_dict = self.model.module.state_dict()
 
+            avg_metrics = self.val_metrics.results.get('avg', {})
             chkpt_logs = {
                 "epoch": epoch,
                 "val_loss": torch.tensor(val_loss),
+                "MeanIoU": avg_metrics.get('MeanIoU'),
+                "GeneralizedDiceScore": avg_metrics.get('GeneralizedDiceScore'),
                 "model_state_dict": self.model.module.state_dict(),
                 "ema_state_dict": ema_state_dict,
             }
@@ -855,6 +858,8 @@ class SupervisedTrainer(Trainer):
                 f"Epoch {epoch} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}"
             )
 
+            avg_metrics = self.val_metric_logger.results.get('avg', {})
+
             # Wandb logging
             if self.run is not None:
                 val_metrics = self.val_metric_logger.results
@@ -872,16 +877,24 @@ class SupervisedTrainer(Trainer):
                     for key in wandb_log_dict['mc'].keys():
                         wandb_log_dict['mc'][key][class_name] = val_metrics['mc'][key][idx]
 
+                miou = avg_metrics.get('MeanIoU')
+                gds = avg_metrics.get('GeneralizedDiceScore')
+                if miou is not None and gds is not None:
+                    miou_f = miou.item() if isinstance(miou, torch.Tensor) else float(miou)
+                    gds_f = gds.item() if isinstance(gds, torch.Tensor) else float(gds)
+                    wandb_log_dict["fitness"] = self.checkpoint_manager.compute_fitness(val_loss, miou_f, gds_f)
+
                 self.run.log(wandb_log_dict)
 
             with apply_ema(self.ema):
                 # Create checkpoint logs
                 ema_state_dict = self.model.module.state_dict()
-
             chkpt_logs = {
                 "epoch": epoch,
                 "train_loss": torch.tensor(train_loss),
                 "val_loss": torch.tensor(val_loss),
+                "MeanIoU": avg_metrics.get('MeanIoU'),
+                "GeneralizedDiceScore": avg_metrics.get('GeneralizedDiceScore'),
                 "model_state_dict": self.model.module.state_dict(),
                 "ema_state_dict": ema_state_dict,
             }
