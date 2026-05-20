@@ -9,6 +9,7 @@ import os
 import json
 import time
 import cv2
+import wandb
 from glob import glob
 import uuid
 import logging
@@ -39,10 +40,9 @@ from src.callbacks import CheckpointManager
 class Trainer(ABC):
     """Abstract Trainer Class"""
 
-    def __init__(self, name: str, tb_writer: SummaryWriter=None):
+    def __init__(self, name: str):
         super().__init__()
         self.name = name
-        self.tb_writer = tb_writer
 
     @abstractmethod
     def _train_step(self, batch) -> Tuple[Any, Any]:
@@ -548,7 +548,6 @@ class SupervisedTrainer(Trainer):
     def __init__(
         self,
         name: str,
-        tb_writer: SummaryWriter,
         conf: OmegaConf,
         model: torch.nn.Module,
         train_loader: torch.utils.data.DataLoader,
@@ -560,7 +559,7 @@ class SupervisedTrainer(Trainer):
         sanity_check: bool=True,
         ema: Optional[EMA]=None,
     ):
-        super().__init__(name=name, tb_writer=tb_writer) # Initialize the name and AverageMeterSet
+        super().__init__(name=name) # Initialize the name and AverageMeterSet
         self.trainer_id = "_".join([name, str(uuid.uuid4())])
         self.conf = conf
         self.model = model
@@ -587,13 +586,24 @@ class SupervisedTrainer(Trainer):
 
             self.map_arr = map_arr
 
+        if conf.is_main:
+            self.run = wandb.init(
+                project="pgcview_v2",
+                entity="oxbowsolutions",
+                name=conf.model_run,
+                config=OmegaConf.to_container(conf, resolve=True),
+                sync_tensorboard=True,
+            )
+        else:
+            self.run = None
+
         # Set up metrics class
-        self.train_metrics = MetricLogger(
+        self.train_metric_logger = MetricLogger(
             name='Train Metrics',
             num_classes=self.conf.model.config.classes, 
             device=self.conf.device
         )
-        self.val_metrics = MetricLogger(
+        self.val_metric_logger = MetricLogger(
             name='Validation Metrics',
             num_classes=self.conf.model.config.classes, 
             device=self.conf.device
@@ -622,7 +632,7 @@ class SupervisedTrainer(Trainer):
         preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
         # Update the training metrics
-        self.train_metrics.update(preds=preds, targets=targets)
+        self.train_metric_logger.update(preds=preds, targets=targets)
 
         return loss, logits
 
@@ -631,6 +641,7 @@ class SupervisedTrainer(Trainer):
         # Put model in training mode and reset meters
         self.model.train()
         self.train_loss_meter.reset()
+        self.train_metric_logger.reset()
 
         # Set progress bar and unpack batches
         p_bar = tqdm(
@@ -671,12 +682,7 @@ class SupervisedTrainer(Trainer):
                 )
             )
 
-            # Tensorboard batch writing
-            batch_step = ((epoch-1) * len(self.train_loader)) + batch_idx
-            if dist.get_rank() == 0:
-                self.tb_writer.add_scalar(
-                    tag="batch_loss/train", scalar_value=loss.item(), global_step=batch_step
-                )
+            dist.barrier()
         
         # ddp barrier
         dist.barrier()
@@ -685,21 +691,8 @@ class SupervisedTrainer(Trainer):
         avg_loss = self.train_loss_meter.compute().item()
 
         # Compute epoch metrics and loss
-        self.train_metrics.compute()
-        rank_log(self.conf.is_main, self.logger.info, self.train_metrics)
-        
-        # Tensorboard epoch logging
-        if dist.get_rank() == 0:
-            self.tb_writer.add_scalar(
-                tag="epoch_loss/train", scalar_value=avg_loss, global_step=epoch
-            )
-
-            self._tb_log_metrics(
-                self.train_metrics.results, 
-                main_tag="train_metrics", 
-                global_step=epoch, 
-                exclude_idx=self.conf.tb_exclude_classes
-            )
+        self.train_metric_logger.compute()
+        rank_log(self.conf.is_main, self.logger.info, self.train_metric_logger)
 
         return avg_loss
 
@@ -722,7 +715,7 @@ class SupervisedTrainer(Trainer):
         preds = torch.argmax(logits, dim=1).to(self.conf.device)
 
         # Update the validation metrics
-        self.val_metrics.update(preds=preds, targets=targets)
+        self.val_metric_logger.update(preds=preds, targets=targets)
 
         return loss, logits
 
@@ -733,6 +726,7 @@ class SupervisedTrainer(Trainer):
         # Put model in eval mode and reset meters
         self.model.eval()
         self.val_loss_meter.reset()
+        self.val_metric_logger.reset()
 
         with apply_ema(self.ema):
             # Set progress bar and unpack batches
@@ -760,12 +754,8 @@ class SupervisedTrainer(Trainer):
                         )
                     )
 
-                    # Tensorboard batch writing
-                    batch_step = ((epoch-1) * len(self.val_loader)) + batch_idx
-                    if dist.get_rank() == 0:
-                        self.tb_writer.add_scalar(
-                            tag="batch_loss/val", scalar_value=loss.item(), global_step=batch_step
-                        )
+                    dist.barrier() # DDP barrier to sync after each batch
+
         # ddp barrier
         dist.barrier()
 
@@ -773,20 +763,8 @@ class SupervisedTrainer(Trainer):
         avg_loss = self.val_loss_meter.compute().item()
 
         # Compute epoch metrics
-        self.val_metrics.compute()
-        rank_log(self.conf.is_main, self.logger.info, self.val_metrics)
-
-        # Tensorboard epoch logging
-        if dist.get_rank() == 0:
-            self.tb_writer.add_scalar(
-                tag="epoch_loss/val", scalar_value=avg_loss, global_step=epoch
-            )
-            self._tb_log_metrics(
-                self.val_metrics.results, 
-                main_tag="val_metrics", 
-                global_step=epoch,
-                exclude_idx=self.conf.tb_exclude_classes
-            )
+        self.val_metric_logger.compute()
+        rank_log(self.conf.is_main, self.logger.info, self.val_metric_logger)
 
         return avg_loss
 
@@ -836,18 +814,18 @@ class SupervisedTrainer(Trainer):
                             )
                         )
 
-    def _tb_log_metrics(self, metric_dict: dict, main_tag: str, global_step: int, exclude_idx: Optional[List[int]]=None):
-        """ Log metrics from a metric dictionary to TensorBoard """
-        for type, v in metric_dict.items(): # type is 'avg' or 'mc'
-            if type == 'avg':
-                for mk, mv in v.items(): # mk is the metric name, mv is the metric value as a torch.Tensor
-                    self.tb_writer.add_scalar(f"{main_tag}/avg_{mk}", mv.item(), global_step=global_step)
-            elif type == 'mc':
-                metric_map = {data['class_idx']: cname for cname, data in self.map_dict.items()} # Create a mapping from class index (int) to class name (str)
-                for mk, mv in v.items():
-                    scalar_dict = {metric_map.get(i): t.item() for i, t in enumerate(mv) if i not in exclude_idx} # Map the tensor values to a new dict with class names as keys
-                    for sk, sv in scalar_dict.items():
-                        self.tb_writer.add_scalar(f"{main_tag}/{sk}_{mk}", sv, global_step=global_step)
+    # def _tb_log_metrics(self, metric_dict: dict, main_tag: str, global_step: int, exclude_idx: Optional[List[int]]=None):
+    #     """ Log metrics from a metric dictionary to TensorBoard """
+    #     for type, v in metric_dict.items(): # type is 'avg' or 'mc'
+    #         if type == 'avg':
+    #             for mk, mv in v.items(): # mk is the metric name, mv is the metric value as a torch.Tensor
+    #                 self.tb_writer.add_scalar(f"{main_tag}/avg_{mk}", mv.item(), global_step=global_step)
+    #         elif type == 'mc':
+    #             metric_map = {data['class_idx']: cname for cname, data in self.map_dict.items()} # Create a mapping from class index (int) to class name (str)
+    #             for mk, mv in v.items():
+    #                 scalar_dict = {metric_map.get(i): t.item() for i, t in enumerate(mv) if i not in exclude_idx} # Map the tensor values to a new dict with class names as keys
+    #                 for sk, sv in scalar_dict.items():
+    #                     self.tb_writer.add_scalar(f"{main_tag}/{sk}_{mk}", sv, global_step=global_step)
 
     def train(self):
         """ Train the model """
@@ -877,12 +855,32 @@ class SupervisedTrainer(Trainer):
                 f"Epoch {epoch} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}"
             )
 
+            # Wandb logging
+            if self.run is not None:
+                val_metrics = self.val_metric_logger.results
+                wandb_log_dict = {
+                    "epoch": epoch,
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "mc": {key: {} for key in val_metrics['mc'].keys()}
+                }
+
+                wandb_log_dict.update({"avg": val_metrics['avg']})
+
+                for class_name, meta in self.map_dict.items():
+                    idx = meta['class_idx']
+                    for key in wandb_log_dict['mc'].keys():
+                        wandb_log_dict['mc'][key][class_name] = val_metrics['mc'][key][idx]
+
+                self.run.log(wandb_log_dict)
+
             with apply_ema(self.ema):
                 # Create checkpoint logs
                 ema_state_dict = self.model.module.state_dict()
 
             chkpt_logs = {
                 "epoch": epoch,
+                "train_loss": torch.tensor(train_loss),
                 "val_loss": torch.tensor(val_loss),
                 "model_state_dict": self.model.module.state_dict(),
                 "ema_state_dict": ema_state_dict,
@@ -894,3 +892,4 @@ class SupervisedTrainer(Trainer):
             if self.scheduler:
                 self.scheduler.step()
 
+        rank_log(self.conf.is_main, self.logger.info, f"Training of {self.trainer_id} completed.")

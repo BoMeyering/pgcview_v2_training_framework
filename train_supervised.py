@@ -121,9 +121,16 @@ def main(conf: omegaconf.OmegaConf=conf):
     rank_log(conf.is_main, logger.info, f"Total world size: {dist.get_world_size()}")
 
     # Augmentation Pipelines
-    train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
-    val_transforms = get_val_transforms(resize=tuple(conf.images.resize))
-    test_transforms = get_val_transforms(resize=tuple(conf.images.resize))
+    train_transforms = get_train_transforms(
+        means=conf.metadata.norm.means, 
+        std=conf.metadata.norm.std,
+        resize=tuple(conf.images.resize)
+    )
+    val_transforms = get_val_transforms(
+        means=conf.metadata.norm.means, 
+        std=conf.metadata.norm.std,
+        resize=tuple(conf.images.resize)
+    )
 
     # Create Datasets
     train_ds = LabeledDataset(
@@ -190,8 +197,7 @@ def main(conf: omegaconf.OmegaConf=conf):
 
     # Initialize Trainer
     supervised_trainer = SupervisedTrainer(
-        name="my supervised trainer",
-        tb_writer=tb_writer,
+        name="supervised trainer",
         conf=conf, 
         model=model, 
         train_loader=train_loader, 

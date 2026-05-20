@@ -57,6 +57,8 @@ transforms = get_tensor_transforms(
     std=conf.metadata.norm.std
 )
 
+torch.save(model, "pgc_view_segformer_model.pth")
+
 augmented = transforms(image=test_image)
 test_image = augmented['image'].cpu().unsqueeze(0)
 
@@ -65,20 +67,20 @@ torch_out = torch_out.detach().squeeze(0).numpy().argmax(axis=0)
 cv2.imwrite("pytorch_output_mask.png", torch_out.astype(np.uint8)*20)
 
 # Export the model to ONNX
-torch.onnx.export(
-    model,
-    (test_image,),
-    "exported_model.onnx",
-    input_names=['input'],
-    output_names=['output'],
-    dynamo=False,
-    opset_version=17
-)
+# torch.onnx.export(
+#     model,
+#     (test_image,),
+#     "exported_model.onnx",
+#     input_names=['input'],
+#     output_names=['output'],
+#     dynamo=False,
+#     opset_version=17
+# )
 
-# Test out onnx inference
-sess = ort.InferenceSession("exported_model.onnx", providers=["CPUExecutionProvider"])
-onnx_out = sess.run(['output'], {'input': test_image.numpy()})
+# # Test out onnx inference
+# sess = ort.InferenceSession("exported_model.onnx", providers=["CPUExecutionProvider"])
+# onnx_out = sess.run(['output'], {'input': test_image.numpy()})
 
-onnx_out = onnx_out[0].squeeze(0)
-out_map = np.argmax(onnx_out, axis=0)
-cv2.imwrite("onnx_output_mask.png", out_map.astype(np.uint8)*20)
+# onnx_out = onnx_out[0].squeeze(0)
+# out_map = np.argmax(onnx_out, axis=0)
+# cv2.imwrite("onnx_output_mask.png", out_map.astype(np.uint8)*20)
