@@ -33,6 +33,8 @@ def setup_loggers(conf):
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(conf.logging_level)
 
+    logging.getLogger("wandb").setLevel(logging.WARNING)
+
 def rank_log(main_process: bool, fn, *args, **kwargs):
     """Log a message only on rank 0 process
     

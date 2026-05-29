@@ -16,6 +16,10 @@ configs=(
     "configs/baseline/segformer_enb5_tvmfdiceloss_k=16.yaml"
     "configs/baseline/segformer_mitb1_tvmfdiceloss_k=16.yaml"
     "configs/baseline/segformer_mitb2_tvmfdiceloss_k=16.yaml"
+    "configs/dinov3/segformer_dinov3s_frozen_focalloss.yaml"
+    "configs/dinov3/segformer_dinov3splus_frozen_focalloss.yaml"
+    "configs/dinov3/segformer_dinov3b_frozen_focalloss.yaml"
+    "configs/dinov3/segformer_dinov3l_frozen_focalloss.yaml"
 )
 
 for cfg in "${configs[@]}"; do

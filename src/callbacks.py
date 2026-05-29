@@ -13,7 +13,18 @@ from datetime import datetime
 from src.utils.loggers import rank_log
 
 class CheckpointManager:
-    def __init__(self, conf: OmegaConf, top_k: int=5, w_loss: float=0.5, w_miou: float=1.0, w_gds: float=1.0):
+    """
+    Class to handle checkpointing after each epoch
+    Saves the top K model checkpoints based on a user set combination of validation loss mIOU and generalized dice score
+    """
+    def __init__(
+        self, 
+        conf: OmegaConf, 
+        top_k: int=5, 
+        w_loss: float=0.5, 
+        w_miou: float=1.0, 
+        w_gds: float=1.0
+    ):
         self.checkpoint_dir = Path(conf.directories.checkpoint_dir)
         self.model_run_name = conf.model_run
         self.logger = logging.getLogger()
@@ -32,10 +43,17 @@ class CheckpointManager:
                 os.makedirs(self.checkpoint_sub_dir, exist_ok=True)
 
     def compute_fitness(self, val_loss: float, mean_iou: float, gds: float) -> float:
+        """ 
+        Compute a fitness score base on a linear combination of the metrics and validation loss.
+        Higher fitness is better. We want to maximize IoU and GDS, but minimize val_loss, so we subtract the loss term.
+        """
         return self.w_miou * mean_iou + self.w_gds * gds - self.w_loss * val_loss
 
     def __call__(self, logs=None):
-        """ Call the CheckpointManager to potentially save a checkpoint based on fitness score. """
+        """
+        Call the CheckpointManager to potentially save a checkpoint based on fitness score.
+        """
+
         val_loss = logs.pop('val_loss', None)
         mean_iou = logs.pop('MeanIoU', None)
         gds = logs.pop('GeneralizedDiceScore', None)

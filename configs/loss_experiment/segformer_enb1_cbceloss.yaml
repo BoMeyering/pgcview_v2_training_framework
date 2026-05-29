@@ -14,7 +14,6 @@ metadata:
 
 # Logging
 logging_level: DEBUG
-tb_exclude_classes: [8, 9, 10, 11]
 
 # Directories
 directories:

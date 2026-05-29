@@ -18,7 +18,6 @@ from omegaconf import OmegaConf, DictConfig, ListConfig
 from omegaconf.base import ContainerMetadata
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
 import torch.distributed as dist
 
 # Local imports
@@ -72,7 +71,6 @@ set_run_name(conf)
 # Set up loggers
 setup_loggers(conf)
 logger = logging.getLogger()
-tb_writer = SummaryWriter(Path('runs') / conf.model_run)
 
 # Set torch device - will set conf.device as 'TYPE:LOCAL_RANK' e.g. 'cuda:0', 'cpu:2' etc
 set_torch_device(conf)
@@ -220,9 +218,8 @@ def main(conf: omegaconf.OmegaConf=conf):
 
     # Initialize FlexMatchTrainer
     flexmatch_trainer = FlexMatchTrainer(
-        name="flexmatch_trainer", 
-        tb_writer=tb_writer,
-        conf=conf, 
+        name="flexmatch_trainer",
+        conf=conf,
         model=model,
         train_loaders=train_loaders,
         val_loader=val_loader,

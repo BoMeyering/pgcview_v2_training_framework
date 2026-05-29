@@ -1,5 +1,5 @@
 # Training configs
-model_run: baseline_segformer_enb4_tvmfdiceloss_k=16
+model_run: baseline_segformer_dinov3b_frozen_focalloss
 
 # Computation Device
 device: cuda
@@ -13,7 +13,7 @@ metadata:
   norm_path: metadata/dataset_norm.json
 
 # Logging
-logging_level: DEBUG
+logging_level: INFO
 
 # Directories
 directories:
@@ -33,9 +33,9 @@ training:
 model:
   architecture: SEGFORMER
   config:
-    encoder_name: efficientnet-b4
+    encoder_name: facebook/dinov3-vitb16-pretrain-lvd1689m
     encoder_depth: 5
-    encoder_weights: imagenet
+    encoder_weights: dinov3
     input_channels: 3
     classes: 12
 
@@ -59,13 +59,13 @@ scheduler:
 
 # Criterion / Loss Function
 loss:
-  name: TVMFDICELOSS
+  name: FOCALLOSS
   reduction: mean
   smooth: 0.05
-  kappa: 16
+  gamma: 2.0
 
 # Batch Sizes
-batch_size: 4
+batch_size: 6
 
 # Multi-processing
 num_workers: 6
