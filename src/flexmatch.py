@@ -77,7 +77,6 @@ def class_beta(logits: torch.Tensor, tau: float=0.85, mapping: str='linear', war
         elif mapping == 'concave':
             beta_t = torch.log(beta_t + 1) / torch.log(2)
 
-        print(beta_t)
         return beta_t
 
     except Exception as e:

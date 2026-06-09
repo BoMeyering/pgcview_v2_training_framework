@@ -79,7 +79,6 @@ class FlexmatchDirectories:
 @dataclass
 class Training:
     epochs: int=30
-    sanity_check: bool=True
 
 @dataclass
 class Loss:
@@ -169,6 +168,13 @@ class Metadata:
     target_mapping: Optional[dict]=None
 
 @dataclass
+class Wandb:
+    entity: str='oxbowsolutions'
+    project: str='pgcview_v2'
+    vis_alpha: float=0.4
+    num_vis_images: int=8
+
+@dataclass
 class TrainSupervisedConfig:
     model_run: str='model_run'
     device: str='cpu'
@@ -185,6 +191,7 @@ class TrainSupervisedConfig:
     optimizer: Optimizer=field(default_factory=Optimizer)
     scheduler: Scheduler=field(default_factory=Scheduler)
     loss: Loss=field(default_factory=Loss)
+    wandb: Wandb=field(default_factory=Wandb)
     batch_size: int=2
     num_workers: int=2
 
@@ -206,6 +213,7 @@ class TrainFlexmatchConfig:
     scheduler: Scheduler=field(default_factory=Scheduler)
     loss: Loss=field(default_factory=Loss)
     flexmatch: FlexMatch=field(default_factory=FlexMatch)
+    wandb: Wandb=field(default_factory=Wandb)
     num_workers: int=2
 
 

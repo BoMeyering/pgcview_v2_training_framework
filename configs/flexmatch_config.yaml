@@ -1,5 +1,5 @@
 # Training configs
-model_run: flexmatch_no_baseline_lam=0.5_segformer_enb1_tvmfdiceloss_k=16
+model_run: flexmatch_baseline_lam=0.3_segformer_enb3_tvmfdiceloss_k=16
 
 # Computation Device
 device: cuda
@@ -13,7 +13,7 @@ metadata:
   norm_path: metadata/dataset_norm.json
 
 # Logging
-logging_level: DEBUG
+logging_level: INFO
 
 # Directories
 directories:
@@ -24,18 +24,16 @@ directories:
   output_dir: outputs
   checkpoint_dir: model_checkpoints
   log_dir: logs/run_logs
-  starting_checkpoint_path: model_checkpoints/baseline_segformer_enb1_tvmfdiceloss_k=16_2025-12-25_13.12.16/baseline_segformer_enb1_tvmfdiceloss_k=16_2025-12-25_13.12.16_latest_epoch_200_vloss-1.319348.pth
-
+  starting_checkpoint_path: model_checkpoints/baseline_segformer_enb3_tvmfdiceloss_k=16_2026-05-21_16.05.05/baseline_segformer_enb3_tvmfdiceloss_k=16_2026-05-21_16.05.05_epoch_108_fitness-0.635833.pth
 # Training
 training:
   epochs: 200
-  sanity_check: True
 
 # Model Architecture
 model:
   architecture: SEGFORMER
   config:
-    encoder_name: efficientnet-b1
+    encoder_name: efficientnet-b3
     encoder_depth: 5
     encoder_weights: imagenet
     input_channels: 3
@@ -68,9 +66,16 @@ loss:
 
 # Flexmatch
 flexmatch:
-  tau: 0.95
+  tau: 0.85
   mapping: linear
   warmup: True
   l_batch_size: 2
   u_batch_size: 4
   lam: 0.3
+
+# Wandb
+wandb:
+  entity: oxbowsolutions
+  project: pgcview_v2
+  vis_alpha: 0.4
+  num_vis_images: 8

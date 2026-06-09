@@ -4,11 +4,11 @@ Base Trainers Classes
 BoMeyering 2025
 """
 
+import math
 import torch
 import os
 import json
 import time
-import cv2
 import wandb
 from glob import glob
 import uuid
@@ -84,7 +84,6 @@ class FlexMatchTrainer(Trainer):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LRScheduler,
         checkpoint_manager: Optional[CheckpointManager]=None,
-        sanity_check: bool=True,
         ema: Optional[EMA]=None,
     ):
         super().__init__(name=name)
@@ -99,7 +98,6 @@ class FlexMatchTrainer(Trainer):
         self.scheduler = scheduler
         self.ema = ema
         self.logger = logging.getLogger()
-        self.sanity_check = sanity_check
         self.checkpoint_manager = checkpoint_manager
         self.train_loss_meter = MeanMetric().to(self.conf.device) # Total loss meter
         self.l_train_loss_meter = MeanMetric().to(self.conf.device) # Labeled loss meter
@@ -119,15 +117,25 @@ class FlexMatchTrainer(Trainer):
 
             self.map_arr = map_arr
 
+        if conf.is_main:
+            self.run = wandb.init(
+                project=conf.wandb.project,
+                entity=conf.wandb.entity,
+                name=conf.model_run,
+                config=OmegaConf.to_container(conf, resolve=True),
+            )
+        else:
+            self.run = None
+
         # Set up metrics class
         self.train_metrics = MetricLogger(
             name='Train Metrics',
-            num_classes=self.conf.model.config.classes, 
+            num_classes=self.conf.model.config.classes,
             device=self.conf.device
         )
         self.val_metrics = MetricLogger(
             name='Validation Metrics',
-            num_classes=self.conf.model.config.classes, 
+            num_classes=self.conf.model.config.classes,
             device=self.conf.device
         )
 
@@ -166,14 +174,14 @@ class FlexMatchTrainer(Trainer):
             weak_logits = self.model(weak_inputs)
 
         # Pseudo-label the unlabled images (calculated in @torch.no_grad() context)
-        # beta_c = class_beta(
-        #     weak_logits, 
-        #     tau=self.conf.flexmatch.tau,
-        #     mapping=self.conf.flexmatch.mapping,
-        #     warmup=self.conf.flexmatch.warmup
-        # )
-        # tau_vec = beta_c * self.conf.flexmatch.tau
-        tau_vec = torch.tensor(self.conf.flexmatch.tau).repeat(12).to(self.conf.device)  # Temporary fix for tau vector issue
+        beta_c = class_beta(
+            weak_logits, 
+            tau=self.conf.flexmatch.tau,
+            mapping=self.conf.flexmatch.mapping,
+            warmup=self.conf.flexmatch.warmup
+        )
+        tau_vec = beta_c * self.conf.flexmatch.tau
+        # tau_vec = torch.tensor(self.conf.flexmatch.tau).repeat(12).to(self.conf.device)  # Temporary fix for tau vector issue
 
         weak_targets, weak_mask = get_pseudo_labels(tau_vec, weak_logits)
 
@@ -238,6 +246,7 @@ class FlexMatchTrainer(Trainer):
         self.u_train_loss_meter.reset()
         self.l_train_loss_meter.reset()
         self.f_loss_meter.reset()
+        self.train_metrics.reset()
         
         # Reinstantiate iterator loaders
         train_l_loader, train_u_loader = self.train_loaders
@@ -310,7 +319,7 @@ class FlexMatchTrainer(Trainer):
         self.train_metrics.compute()
         rank_log(self.conf.is_main, self.logger.info, self.train_metrics)
 
-        return avg_loss, avg_l_loss, avg_u_loss
+        return avg_loss, avg_l_loss, avg_u_loss, avg_f
 
     @torch.no_grad()
     def _val_step(self, batch: Tuple):
@@ -380,52 +389,51 @@ class FlexMatchTrainer(Trainer):
 
         return avg_loss
 
-    def _sanity_check(self, epoch):
-        """ Run a sanity check for the model """
-        rank_log(self.conf.is_main, self.logger.info, f"SANITY CHECK {epoch}")
+    def _log_val_images(self, epoch: int) -> list:
+        """Run inference on a subset of the val set and return overlay images for wandb."""
+        num_images = self.conf.wandb.num_vis_images
+        alpha = self.conf.wandb.vis_alpha
+        means = np.array(self.conf.metadata.norm.means)
+        stds = np.array(self.conf.metadata.norm.std)
+        wandb_images = []
+        logged = 0
+        batches_needed = None
 
-        out_dir = Path(self.conf.directories.output_dir) / self.conf.model_run / "_".join(["epoch", str(epoch)])
-        if self.conf.local_rank == 0:
-            os.makedirs(out_dir)
-            
+        self.model.eval()
         with apply_ema(self.ema):
-            # Set progress bar and unpack batches
-            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='green', disable=not is_main_process())
+            with torch.inference_mode():
+                for batch in self.val_loader:
+                    img, targets, img_keys = batch
+                    batch_size = len(img)
+                    if batches_needed is None:
+                        batches_needed = math.ceil(num_images / batch_size)
 
-            # Iterate through the batches
-            with torch.inference_mode():  
-                for batch_idx, batch in p_bar:
-                    if batch_idx % 10 == 0:
-                        # Unpack batch and send to device
-                        img, targets, img_keys = batch
-                        inputs = img.to(self.conf.device, non_blocking=True)
-                        targets = targets.long().to(self.conf.device, non_blocking=True)
+                    inputs = img.float().to(self.conf.device)
+                    logits = self.model(inputs)
+                    preds = torch.argmax(logits, dim=1).cpu().numpy().astype(np.uint8)
 
-                        # Forward pass through model
-                        logits = self.model(inputs)
+                    for i in range(min(batch_size, num_images - logged)):
+                        # Denormalize: (3, H, W) -> (H, W, 3) RGB uint8
+                        raw = img[i].cpu().numpy()
+                        raw = raw * stds[:, None, None] + means[:, None, None]
+                        raw = np.clip(raw * 255, 0, 255).astype(np.uint8)
+                        raw = np.moveaxis(raw, 0, 2)
 
-                        maps = torch.argmax(logits, dim=1)
+                        pred = preds[i]
+                        if getattr(self, 'map_arr', None) is not None:
+                            colored = self.map_arr[pred][..., ::-1]  # BGR -> RGB
+                        else:
+                            gray = np.clip(pred * 20, 0, 255).astype(np.uint8)
+                            colored = np.stack([gray, gray, gray], axis=-1)
 
-                        # for i, img in enumerate(maps):
-                        for img_key, img in zip(img_keys, maps):
-                            img = img.detach().cpu().numpy().astype(np.uint8)
-                            if getattr(self, 'map_arr', None) is not None:
-                                img = self.map_arr[img]
-                            else:
-                                img *= 20 # Scale outputs to make class distinction clear
+                        overlay = np.clip(alpha * colored + (1 - alpha) * raw, 0, 255).astype(np.uint8)
+                        wandb_images.append(wandb.Image(overlay, caption=Path(img_keys[i]).stem))
+                        logged += 1
 
-                            cv2.imwrite(str(Path(out_dir) / f"{Path(img_key).stem}_outmap.png"), img)
-                        
-                        # Update the progress bar
-                        p_bar.set_description(
-                            "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
-                                epoch=epoch,
-                                epochs=self.conf.training.epochs,
-                                batch=batch_idx + 1,
-                                iter=len(self.val_loader)
-                            )
-                        )
+                    if batches_needed is not None and len(wandb_images) >= num_images:
+                        break
 
+        return wandb_images
 
     def train(self):
         """ Train the model using the FlexMatch algorithm """
@@ -435,7 +443,7 @@ class FlexMatchTrainer(Trainer):
         for epoch in range(1, self.conf.training.epochs + 1):
             # Train and validate one epoch
             rank_log(self.conf.is_main, self.logger.info, f"TRAINING EPOCH {epoch}")
-            train_loss, l_loss, u_loss = self._train_epoch(epoch)
+            train_loss, l_loss, u_loss, avg_f = self._train_epoch(epoch)
             time.sleep(1)
             dist.barrier()
 
@@ -444,23 +452,51 @@ class FlexMatchTrainer(Trainer):
             time.sleep(1)
             dist.barrier()
 
-            if self.sanity_check:
-                self._sanity_check(epoch)
-                time.sleep(1)
-                dist.barrier()
-            
             # Logger Logging
             rank_log(
-                self.conf.is_main, 
+                self.conf.is_main,
                 self.logger.info,
                 f"Epoch {epoch} - Train Loss: {train_loss:.6f} (Labeled: {l_loss:.6f}, Unlabeled: {u_loss:.6f}) - Val Loss: {val_loss:.6f}"
             )
+
+            avg_metrics = self.val_metrics.results.get('avg', {})
+
+            # Wandb logging
+            if self.run is not None:
+                val_metrics = self.val_metrics.results
+                wandb_log_dict = {
+                    "epoch": epoch,
+                    "train_loss": train_loss,
+                    "train_labeled_loss": l_loss,
+                    "train_unlabeled_loss": u_loss,
+                    "pseudo_label_confidence_fraction": avg_f,
+                    "val_loss": val_loss,
+                    "mc": {key: {} for key in val_metrics['mc'].keys()}
+                }
+
+                wandb_log_dict.update({"avg": val_metrics['avg']})
+
+                for class_name, meta in self.map_dict.items():
+                    idx = meta['class_idx']
+                    for key in wandb_log_dict['mc'].keys():
+                        wandb_log_dict['mc'][key][class_name] = val_metrics['mc'][key][idx]
+
+                miou = avg_metrics.get('MeanIoU')
+                gds = avg_metrics.get('GeneralizedDiceScore')
+                if miou is not None and gds is not None:
+                    miou_f = miou.item() if isinstance(miou, torch.Tensor) else float(miou)
+                    gds_f = gds.item() if isinstance(gds, torch.Tensor) else float(gds)
+                    wandb_log_dict["fitness"] = self.checkpoint_manager.compute_fitness(val_loss, miou_f, gds_f)
+
+                wandb_log_dict["val_predictions"] = self._log_val_images(epoch)
+                self.run.log(wandb_log_dict)
+
+            dist.barrier()
 
             with apply_ema(self.ema):
                 # Create checkpoint logs
                 ema_state_dict = self.model.module.state_dict()
 
-            avg_metrics = self.val_metrics.results.get('avg', {})
             chkpt_logs = {
                 "epoch": epoch,
                 "val_loss": torch.tensor(val_loss),
@@ -489,7 +525,6 @@ class SupervisedTrainer(Trainer):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LRScheduler,
         checkpoint_manager=Optional[CheckpointManager],
-        sanity_check: bool=True,
         ema: Optional[EMA]=None,
     ):
         super().__init__(name=name) # Initialize the name and AverageMeterSet
@@ -503,7 +538,6 @@ class SupervisedTrainer(Trainer):
         self.scheduler = scheduler
         self.ema = ema
         self.logger = logging.getLogger()
-        self.sanity_check = sanity_check
         self.checkpoint_manager = checkpoint_manager
         self.train_loss_meter = MeanMetric().to(self.conf.device)
         self.val_loss_meter = MeanMetric().to(self.conf.device)
@@ -521,8 +555,8 @@ class SupervisedTrainer(Trainer):
 
         if conf.is_main:
             self.run = wandb.init(
-                project="pgcview_v2",
-                entity="oxbowsolutions",
+                project=conf.wandb.project,
+                entity=conf.wandb.entity,
                 name=conf.model_run,
                 config=OmegaConf.to_container(conf, resolve=True),
             )
@@ -700,51 +734,51 @@ class SupervisedTrainer(Trainer):
 
         return avg_loss
 
-    def _sanity_check(self, epoch):
-        """ Run a sanity check for the model """
-        rank_log(self.conf.is_main, self.logger.info, f"SANITY CHECK {epoch}")
+    def _log_val_images(self, epoch: int) -> list:
+        """Run inference on a subset of the val set and return overlay images for wandb."""
+        num_images = self.conf.wandb.num_vis_images
+        alpha = self.conf.wandb.vis_alpha
+        means = np.array(self.conf.metadata.norm.means)
+        stds = np.array(self.conf.metadata.norm.std)
+        wandb_images = []
+        logged = 0
+        batches_needed = None
 
-        out_dir = Path(self.conf.directories.output_dir) / self.conf.model_run / "_".join(["epoch", str(epoch)])
-        if self.conf.local_rank == 0:
-            os.makedirs(out_dir)
-            
+        self.model.eval()
         with apply_ema(self.ema):
-            # Set progress bar and unpack batches
-            p_bar = tqdm(enumerate(self.val_loader), total=len(self.val_loader), colour='green', disable=not is_main_process())
+            with torch.inference_mode():
+                for batch in self.val_loader:
+                    img, targets, img_keys = batch
+                    batch_size = len(img)
+                    if batches_needed is None:
+                        batches_needed = math.ceil(num_images / batch_size)
 
-            # Iterate through the batches
-            with torch.inference_mode():  
-                for batch_idx, batch in p_bar:
-                    if batch_idx % 10 == 0:
-                        # Unpack batch and send to device
-                        img, targets, img_keys = batch
-                        inputs = img.to(self.conf.device, non_blocking=True)
-                        targets = targets.long().to(self.conf.device, non_blocking=True)
+                    inputs = img.float().to(self.conf.device)
+                    logits = self.model(inputs)
+                    preds = torch.argmax(logits, dim=1).cpu().numpy().astype(np.uint8)
 
-                        # Forward pass through model
-                        logits = self.model(inputs)
+                    for i in range(min(batch_size, num_images - logged)):
+                        # Denormalize: (3, H, W) -> (H, W, 3) RGB uint8
+                        raw = img[i].cpu().numpy()
+                        raw = raw * stds[:, None, None] + means[:, None, None]
+                        raw = np.clip(raw * 255, 0, 255).astype(np.uint8)
+                        raw = np.moveaxis(raw, 0, 2)
 
-                        maps = torch.argmax(logits, dim=1)
+                        pred = preds[i]
+                        if getattr(self, 'map_arr', None) is not None:
+                            colored = self.map_arr[pred][..., ::-1]  # BGR -> RGB
+                        else:
+                            gray = np.clip(pred * 20, 0, 255).astype(np.uint8)
+                            colored = np.stack([gray, gray, gray], axis=-1)
 
-                        # for i, img in enumerate(maps):
-                        for img_key, img in zip(img_keys, maps):
-                            img = img.detach().cpu().numpy().astype(np.uint8)
-                            if getattr(self, 'map_arr', None) is not None:
-                                img = self.map_arr[img]
-                            else:
-                                img *= 20 # Scale outputs to make class distinction clear
+                        overlay = np.clip(alpha * colored + (1 - alpha) * raw, 0, 255).astype(np.uint8)
+                        wandb_images.append(wandb.Image(overlay, caption=Path(img_keys[i]).stem))
+                        logged += 1
 
-                            cv2.imwrite(str(Path(out_dir) / f"{Path(img_key).stem}_outmap.png"), img)
-                        
-                        # Update the progress bar
-                        p_bar.set_description(
-                            "Sanity Check: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}.".format(
-                                epoch=epoch,
-                                epochs=self.conf.training.epochs,
-                                batch=batch_idx + 1,
-                                iter=len(self.val_loader)
-                            )
-                        )
+                    if batches_needed is not None and len(wandb_images) >= num_images:
+                        break
+
+        return wandb_images
 
     def train(self):
         """ Train the model """
@@ -762,15 +796,10 @@ class SupervisedTrainer(Trainer):
             time.sleep(1)
             dist.barrier()
 
-            if self.sanity_check:
-                self._sanity_check(epoch)
-                time.sleep(1)
-                dist.barrier()
-
             # Logger Logging
             rank_log(
                 self.conf.is_main,
-                self.logger.info, 
+                self.logger.info,
                 f"Epoch {epoch} - Train Loss: {train_loss:.6f} - Val Loss: {val_loss:.6f}"
             )
 
@@ -800,7 +829,10 @@ class SupervisedTrainer(Trainer):
                     gds_f = gds.item() if isinstance(gds, torch.Tensor) else float(gds)
                     wandb_log_dict["fitness"] = self.checkpoint_manager.compute_fitness(val_loss, miou_f, gds_f)
 
+                wandb_log_dict["val_predictions"] = self._log_val_images(epoch)
                 self.run.log(wandb_log_dict)
+
+            dist.barrier()
 
             with apply_ema(self.ema):
                 # Create checkpoint logs

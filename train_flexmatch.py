@@ -203,7 +203,13 @@ def main(conf: omegaconf.OmegaConf=conf):
             
             checkpoint = torch.load(conf.directories.starting_checkpoint_path, map_location='cpu', weights_only=False) # Load to CPU first to avoid collision with EMA weights
             if 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
+                state_dict = checkpoint['model_state_dict']
+                # Handle checkpoints saved from a plain (non-DDP) model — load into model.module
+                # to avoid the `module.` prefix mismatch introduced by DDP wrapping
+                if not any(k.startswith('module.') for k in state_dict):
+                    model.module.load_state_dict(state_dict)
+                else:
+                    model.load_state_dict(state_dict)
             if ema is not None and 'ema_state_dict' in checkpoint:
                 ema.shadow_params = checkpoint['ema_state_dict']
                 rank_log(conf.is_main, logger.info, f"Loaded EMA state dict from starting checkpoint.")

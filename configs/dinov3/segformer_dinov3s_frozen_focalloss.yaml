@@ -27,7 +27,6 @@ directories:
 # Training
 training:
   epochs: 300
-  sanity_check: True
 
 # Model Architecture
 model:
@@ -69,3 +68,9 @@ batch_size: 6
 
 # Multi-processing
 num_workers: 6
+# Wandb
+wandb:
+  entity: oxbowsolutions
+  project: pgcview_v2
+  vis_alpha: 0.4
+  num_vis_images: 8
