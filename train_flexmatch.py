@@ -1,0 +1,246 @@
+"""
+train_flexmatch.py
+Main training script for the PGCView V2 semantic segmentation model
+BoMeyering 2025
+"""
+
+import torch
+import os
+import logging
+import argparse
+import omegaconf
+import torch.distributed as dist
+import collections
+import typing
+from argparse import ArgumentParser
+from pathlib import Path
+from omegaconf import OmegaConf, DictConfig, ListConfig
+from omegaconf.base import ContainerMetadata
+from torch.utils.data import DataLoader, DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
+
+# Local imports
+import src
+from src.models import create_smp_model
+from src.datasets import LabeledDataset, UnlabeledDataset
+from src.dataloaders import DistributedDataLoaderBalancer
+from src.flexmatch import class_beta
+from src.trainer import FlexMatchTrainer
+from src.metrics import MetricLogger
+from src.losses import get_loss_criterion, read_class_counts
+from src.parameters import OptimConfig, EMA
+from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
+from src.utils.device import set_torch_device
+from src.utils.config import TrainFlexmatchConfig, set_run_name
+from src.utils.loggers import setup_loggers, rank_log
+from src.distributed import set_env_ranks, setup_ddp, shutdown_ddp
+from src.callbacks import CheckpointManager
+
+# Create a parser for command line arguments
+parser = ArgumentParser(
+    prog="train_flexmatch.py",
+    description="Main Flexmatch training script for the PGCView V2 semantic segmentation model."
+)
+# Add arguments for config file and then parse CLI args
+parser.add_argument('-c', '--config', type=str, help="The path to the training config YAML file. Defaults to 'configs/train_config.yaml'", default='configs/train_config.yaml')
+parser.add_argument('-b', '--backend', type=str, help="The backend to use for torchrun. Defaults to 'gloo'", default='gloo')
+args = parser.parse_args()
+
+if not os.path.exists(args.config):
+    raise FileNotFoundError(f"The path to the configuration file {args.config} was not found.")
+
+# Set the backend engine for torchrunis_main
+backend = args.backend
+setup_ddp(backend=backend)
+
+#----------------------------------------#
+# Set up configuration objects
+#----------------------------------------#
+# Read in the configuration file and merge with default dict
+yaml_conf = OmegaConf.load(args.config) # Load user supplied config file
+default_conf = OmegaConf.structured(TrainFlexmatchConfig) # Load the default config structure - to fill in any missing args
+conf = OmegaConf.merge(default_conf, yaml_conf) # Any args in yaml_conf will override defaults
+
+# Set the ranks, world size, and is_main
+set_env_ranks(conf)
+
+# Append timestamp to run name
+set_run_name(conf)
+
+# Set up loggers
+setup_loggers(conf)
+logger = logging.getLogger()
+
+# Set torch device - will set conf.device as 'TYPE:LOCAL_RANK' e.g. 'cuda:0', 'cpu:2' etc
+set_torch_device(conf)
+
+# Set data normalization values
+set_normalization_values(conf)
+
+# print(type(conf.loss.samples))
+
+# Read class sample counts from file and set conf.loss samples and inverse weights
+if conf.loss.get('class_sample_count_path', None) is not None:
+    print(conf.loss.class_sample_count_path)
+    samples, inv_weights = read_class_counts(conf.loss.class_sample_count_path)
+    conf.loss.samples, conf.loss.weights = samples, inv_weights
+    rank_log(conf.is_main, logger.info, f"Set conf.loss.samples and conf.loss.weights from {conf.loss.class_sample_count_path}")
+else:
+    del conf.loss.samples
+    del conf.loss.weights
+    rank_log(conf.is_main, logger.info, f"No class sample count path provided; not setting conf.loss.samples or conf.loss.weights.")
+
+#----------------------------------------#
+# Main entry point
+#----------------------------------------#
+def main(conf: omegaconf.OmegaConf=conf):
+    """Main function to run the FlexMatch training script
+
+    Run the main training script for FlexMatch training of the PGCView V2 semantic segmentation model.
+    Pulls in all of the configurations from the provided config file and sets up the model, datasets, dataloaders,
+    optimizer, scheduler, and criterion. Then initializes the FlexMatchTrainer class and starts training.
+
+    Parameters:
+    -----------
+        conf : omegaconf.OmegaConf, optional
+            The OmegaConf configuration dictionary, by default conf
+    """
+
+    # Log training
+    rank_log(conf.is_main, logger.info, "Current Training Configuration\n"+OmegaConf.to_yaml(conf))
+
+    # Create and wrap model for DDP
+    model = create_smp_model(conf=conf).to(conf.device)
+    model = DDP(
+        model, 
+        device_ids=[conf.local_rank] if 'cuda' in conf.device else None, 
+        output_device=conf.local_rank if 'cuda' in conf.device else None, 
+        find_unused_parameters=True
+    )
+    rank_log(conf.is_main, logger.info, f"Created model {conf.model.architecture.value} with encoder {conf.model.config.encoder_name}")
+    if 'cuda' in conf.device:
+        rank_log(conf.is_main, logger.info, f"Main process is on {torch.cuda.get_device_name(0)} - {conf.device}")
+    else:
+        rank_log(conf.is_main, logger.info, f"Main process is on {conf.device}")
+    rank_log(conf.is_main, logger.info, f"Total world size: {dist.get_world_size()}")
+
+    # Augmentation Pipelines
+    train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
+    weak_transforms = get_weak_transforms(resize=tuple(conf.images.resize))
+    strong_transforms = get_strong_transforms(resize=tuple(conf.images.resize))
+    val_transforms = get_val_transforms(resize=tuple(conf.images.resize))
+    test_transforms = get_val_transforms(resize=tuple(conf.images.resize))
+
+    # Create Datasets
+    train_l_ds = LabeledDataset(
+        root_dir=conf.directories.train_labeled_dir,
+        transforms=train_transforms
+    )
+
+    train_u_ds = UnlabeledDataset(
+        root_dir=conf.directories.train_unlabeled_dir,
+        weak_transforms=weak_transforms
+    )
+
+    val_ds = LabeledDataset(
+        root_dir=conf.directories.val_dir,
+        transforms=val_transforms
+    )
+
+    # test_ds = LabeledDataset(
+    #     root_dir=conf.directories.test_dir,
+    #     transforms=test_transforms
+    # )
+
+    # Create balanced DDP ready dataloaders
+    dataloader_balancer = DistributedDataLoaderBalancer(
+        datasets=[train_l_ds, train_u_ds],
+        batch_sizes=[conf.flexmatch.l_batch_size, conf.flexmatch.u_batch_size],
+        num_replicas=conf.world_size,
+        rank=conf.local_rank,
+        shuffle=True,
+        drop_last=True
+    )
+
+    balanced_dataloaders = dataloader_balancer.balance_loaders()
+    train_loaders = balanced_dataloaders.dataloaders
+
+    val_sampler = DistributedSampler(
+        dataset=val_ds, 
+        rank=conf.local_rank, 
+        shuffle=False, 
+        drop_last=True
+    )
+    val_loader = DataLoader(
+        dataset=val_ds, 
+        batch_size=conf.flexmatch.l_batch_size,
+        shuffle=False,
+        sampler=val_sampler,
+        drop_last=True,
+        num_workers=6
+    )
+
+    # Optimizer
+    optim_config = OptimConfig(conf=conf, model=model)
+    model, optimizer, scheduler = optim_config.process()
+    
+    # Criterion
+    criterion = get_loss_criterion(conf)
+    rank_log(conf.is_main, logger.info, f"Instantiated loss criterion {type(criterion)}")
+
+    # Initialize EMA if specified
+    if conf.optimizer.ema:
+        ema = EMA(model, decay=conf.optimizer.ema_decay, verbose=True)
+        rank_log(conf.is_main, logger.info, f"Exponential Moving Average (EMA) enabled with decay rate {conf.optimizer.ema_decay}.")
+    else:
+        ema = None
+
+    # Reload model weights if specified
+    if conf.directories.starting_checkpoint_path is not None:
+        if os.path.exists(conf.directories.starting_checkpoint_path):
+            rank_log(conf.is_main, logger.info, f"Loading starting checkpoint from {conf.directories.starting_checkpoint_path}")
+            
+            checkpoint = torch.load(conf.directories.starting_checkpoint_path, map_location='cpu', weights_only=False) # Load to CPU first to avoid collision with EMA weights
+            if 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+                # Handle checkpoints saved from a plain (non-DDP) model — load into model.module
+                # to avoid the `module.` prefix mismatch introduced by DDP wrapping
+                if not any(k.startswith('module.') for k in state_dict):
+                    model.module.load_state_dict(state_dict)
+                else:
+                    model.load_state_dict(state_dict)
+            if ema is not None and 'ema_state_dict' in checkpoint:
+                ema.shadow_params = checkpoint['ema_state_dict']
+                rank_log(conf.is_main, logger.info, f"Loaded EMA state dict from starting checkpoint.")
+            rank_log(conf.is_main, logger.info, f"Successfully loaded model state dict from starting checkpoint.")
+        else:
+            rank_log(conf.is_main, logger.warning, f"Starting checkpoint path {conf.directories.starting_checkpoint_path} does not exist. Continuing with randomly initialized weights.")
+
+    # Create checkpoint manager
+    checkpoint_manager = CheckpointManager(
+        conf=conf
+    )
+
+    # Initialize FlexMatchTrainer
+    flexmatch_trainer = FlexMatchTrainer(
+        name="flexmatch_trainer",
+        conf=conf,
+        model=model,
+        train_loaders=train_loaders,
+        val_loader=val_loader,
+        train_length=balanced_dataloaders.steps_per_epoch,
+        criterion=criterion,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        checkpoint_manager=checkpoint_manager,
+        ema=ema
+    )
+
+    # Start training
+    flexmatch_trainer.train()
+
+    shutdown_ddp()
+
+if __name__ == '__main__':
+    main()

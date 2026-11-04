@@ -59,7 +59,7 @@ class StatDataset(Dataset):
         # Load the image, convert to RGB format
         try:
             img_path = self.img_dir / img_key
-            img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+            img = cv2.imread(str(img_path), cv2.IMREAD_COLOR_RGB)
             if img is None:
                 return {
                     "img": torch.zeros(3, 512, 512),
@@ -67,7 +67,6 @@ class StatDataset(Dataset):
                     "is_error": True,
                     "errors": f"There was a problem reading in the image."
                 }
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = img.astype("float32") / 255.0 # Normalize image to [0, 1]
             tensor_img = self.transforms(image=img)['image'] # Convert to tensor
 
@@ -247,7 +246,7 @@ class LabeledDataset(Dataset):
         target_path = Path(self.target_dir) / target_key
 
         # read in images and targets
-        img = cv2.imread(str(img_path))
+        img = cv2.imread(str(img_path), cv2.IMREAD_COLOR_RGB)
         target = cv2.imread(str(target_path), cv2.IMREAD_GRAYSCALE)
 
         # transform images and targets
@@ -311,7 +310,7 @@ class UnlabeledDataset(Dataset):
         img_path = Path(self.img_dir) / img_key
 
         # Read in the unlabeled image
-        img = cv2.imread(str(img_path))
+        img = cv2.imread(str(img_path), cv2.IMREAD_COLOR_RGB)
 
         # Run weak transforms on image
         weak_img = self.weak_transforms(image=img)['image']

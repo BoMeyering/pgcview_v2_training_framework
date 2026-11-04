@@ -259,6 +259,7 @@ class EMA:
         self._orig_params_cpu = {}
         self.update_params()
         self.verbose = verbose
+        
     @torch.no_grad()
     def update_params(self):
         """
@@ -272,9 +273,9 @@ class EMA:
             if name not in self.shadow_params:
                 self.shadow_params[name] = param.detach().to('cpu').clone()
             else:
-                shadow_param = self.shadow_params[name]
-                shadow_param.mul_(self.decay).add_(param.detach().to('cpu'), alpha=1-self.decay)
-                self.shadow_params[name] = self.decay * self.shadow_params[name] + (1 - self.decay) * param.detach().to('cpu')
+                self.shadow_params[name].mul_(self.decay).add_(
+                    param.detach().to('cpu'), alpha=1-self.decay
+                )
                     
     @torch.no_grad()
     def assign_params(self):

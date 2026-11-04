@@ -13,6 +13,12 @@ from omegaconf import OmegaConf
 from enum import Enum
 from typing import List, Optional, Union, Tuple
 
+# TO REMOVE WHEN NO LONGER NEEDED!
+@dataclass
+class BatchSize:
+    labeled: int=2
+    unlabeled: int=2
+
 
 class ModelArchitecture(Enum):
     """
@@ -51,6 +57,16 @@ class Images:
 
 @dataclass
 class Directories:
+    train_dir: str='data/processed/train/labeled'
+    val_dir: str='data/processed/val'
+    test_dir: str='data/processed/test'
+    output_dir: str='outputs'
+    checkpoint_dir: str='model_checkpoints'
+    log_dir: str='logs/run_logs'
+    starting_checkpoint_path: Optional[str]=None
+
+@dataclass
+class FlexmatchDirectories:
     train_labeled_dir: str='data/processed/train/labeled'
     train_unlabeled_dir: str='data/processed/train/unlabeled'
     val_dir: str='data/processed/val'
@@ -58,11 +74,11 @@ class Directories:
     output_dir: str='outputs'
     checkpoint_dir: str='model_checkpoints'
     log_dir: str='logs/run_logs'
+    starting_checkpoint_path: Optional[str]=None
 
 @dataclass
 class Training:
     epochs: int=30
-    sanity_check: bool=True
 
 @dataclass
 class Loss:
@@ -81,15 +97,13 @@ class Loss:
     exclude_empty_target: bool=True
 
 @dataclass
-class BatchSize:
-    labeled: int=2
-    unlabeled: int=2
-
-@dataclass
 class FlexMatch:
     tau: float=0.95
     mapping: str="linear"
     warmup: bool=True
+    lam: float=1.0
+    l_batch_size: int=2
+    u_batch_size: int=2
 
 @dataclass
 class SMPModelConfig:
@@ -154,6 +168,13 @@ class Metadata:
     target_mapping: Optional[dict]=None
 
 @dataclass
+class Wandb:
+    entity: str='oxbowsolutions'
+    project: str='pgcview_v2'
+    vis_alpha: float=0.4
+    num_vis_images: int=8
+
+@dataclass
 class TrainSupervisedConfig:
     model_run: str='model_run'
     device: str='cpu'
@@ -164,23 +185,36 @@ class TrainSupervisedConfig:
     images: Images=field(default_factory=Images)
     metadata: Metadata=field(default_factory=Metadata)
     logging_level: str='INFO'
-    tb_exclude_classes: Optional[List[int]]=None
     directories: Directories=field(default_factory=Directories)
     training: Training=field(default_factory=Training)
     model: Model=field(default_factory=Model)
     optimizer: Optimizer=field(default_factory=Optimizer)
     scheduler: Scheduler=field(default_factory=Scheduler)
     loss: Loss=field(default_factory=Loss)
-    batch_size: BatchSize=field(default_factory=BatchSize)
-    flexmatch: FlexMatch=field(default_factory=FlexMatch)
+    wandb: Wandb=field(default_factory=Wandb)
+    batch_size: int=2
+    num_workers: int=2
 
 @dataclass
-class TrainSemiSupervisedConfig(TrainSupervisedConfig):
-    model_run: str='semi_supervised_model_run'
-    images: Images=field(default_factory=Images)
-    directories: Directories=field(default_factory=Directories)
-    training: Training=field(default_factory=Training)
+class TrainFlexmatchConfig:
+    model_run: str='flexmatch_model_run'
     device: str='cpu'
+    rank: Optional[int]=None
+    local_rank: Optional[int]=None
+    world_size: Optional[int]=None
+    is_main: Optional[bool]=None
+    images: Images=field(default_factory=Images)
+    metadata: Metadata=field(default_factory=Metadata)
+    logging_level: str='INFO'
+    directories: FlexmatchDirectories=field(default_factory=FlexmatchDirectories)
+    training: Training=field(default_factory=Training)
+    model: Model=field(default_factory=Model)
+    optimizer: Optimizer=field(default_factory=Optimizer)
+    scheduler: Scheduler=field(default_factory=Scheduler)
+    loss: Loss=field(default_factory=Loss)
+    flexmatch: FlexMatch=field(default_factory=FlexMatch)
+    wandb: Wandb=field(default_factory=Wandb)
+    num_workers: int=2
 
 
 def set_run_name(conf: OmegaConf):

@@ -172,3 +172,5 @@ runs/
 logs/
 *.insyncdl
 .VSCodeCounter
+wandb/
+.vscode/

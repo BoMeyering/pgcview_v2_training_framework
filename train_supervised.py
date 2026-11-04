@@ -14,22 +14,16 @@ from argparse import ArgumentParser
 from pathlib import Path
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, DistributedSampler
-from torch.optim import SGD, Adam
-from torch.optim.lr_scheduler import ExponentialLR
-from torch.nn import CrossEntropyLoss
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
 import torch.distributed as dist
 
 # Local imports
 from src.models import create_smp_model
-from src.datasets import LabeledDataset, UnlabeledDataset
-from src.flexmatch import class_beta
-from src.trainer import SupervisedTrainer, FlexMatchTrainer
-from src.metrics import MetricLogger, MeterSet, RunningAvgMeter, ValueMeter
+from src.datasets import LabeledDataset
+from src.trainer import SupervisedTrainer
 from src.losses import get_loss_criterion, read_class_counts
 from src.parameters import OptimConfig, EMA
-from src.transforms import get_train_transforms, get_val_transforms, get_strong_transforms, get_weak_transforms, set_normalization_values
+from src.transforms import get_train_transforms, get_val_transforms, set_normalization_values
 from src.utils.device import set_torch_device
 from src.utils.config import TrainSupervisedConfig, set_run_name
 from src.utils.loggers import setup_loggers, rank_log
@@ -70,7 +64,6 @@ set_run_name(conf)
 # Set up loggers
 setup_loggers(conf)
 logger = logging.getLogger()
-tb_writer = SummaryWriter(Path('runs') / conf.model_run)
 
 # Set torch device - will set conf.device as 'TYPE:LOCAL_RANK' e.g. 'cuda:0', 'cpu:2' etc
 set_torch_device(conf)
@@ -126,13 +119,20 @@ def main(conf: omegaconf.OmegaConf=conf):
     rank_log(conf.is_main, logger.info, f"Total world size: {dist.get_world_size()}")
 
     # Augmentation Pipelines
-    train_transforms = get_train_transforms(resize=tuple(conf.images.resize))
-    val_transforms = get_val_transforms(resize=tuple(conf.images.resize))
-    test_transforms = get_val_transforms(resize=tuple(conf.images.resize))
+    train_transforms = get_train_transforms(
+        means=conf.metadata.norm.means, 
+        std=conf.metadata.norm.std,
+        resize=tuple(conf.images.resize)
+    )
+    val_transforms = get_val_transforms(
+        means=conf.metadata.norm.means, 
+        std=conf.metadata.norm.std,
+        resize=tuple(conf.images.resize)
+    )
 
     # Create Datasets
     train_ds = LabeledDataset(
-        root_dir=conf.directories.train_labeled_dir,
+        root_dir=conf.directories.train_dir,
         transforms=train_transforms
     )
 
@@ -140,11 +140,6 @@ def main(conf: omegaconf.OmegaConf=conf):
         root_dir=conf.directories.val_dir,
         transforms=val_transforms
     )
-
-    # test_ds = LabeledDataset(
-    #     root_dir=conf.directories.test_dir,
-    #     transforms=test_transforms
-    # )
 
     # Create distributed Samplers
     train_sampler = DistributedSampler(
@@ -159,36 +154,24 @@ def main(conf: omegaconf.OmegaConf=conf):
         shuffle=False, 
         drop_last=True
     )
-    # test_sampler = DistributedSampler(
-    #     dataset=test_ds, 
-    #     rank=conf.local_rank, 
-    #     shuffle=False, 
-    #     drop_last=False
-    # )
     
     # Create DataLoaders
     train_loader = DataLoader(
         dataset=train_ds, 
-        batch_size=conf.batch_size.labeled, 
-        # batch_size=6,
+        batch_size=conf.batch_size,
         shuffle=False,
+        num_workers=conf.num_workers,
         sampler=train_sampler,
         drop_last=True
     )
     val_loader = DataLoader(
         dataset=val_ds, 
-        batch_size=conf.batch_size.labeled,
-        # batch_size=6,
+        batch_size=conf.batch_size,
         shuffle=False,
+        num_workers=conf.num_workers,
         sampler=val_sampler,
         drop_last=True
     )
-    # test_loader = DataLoader(
-    #     dataset=test_ds, 
-    #     batch_size=conf.batch_size.labeled, 
-    #     shuffle=False,
-    #     sampler=test_sampler
-    # )
 
     # Optimizer
     optim_config = OptimConfig(conf=conf, model=model)
@@ -205,12 +188,6 @@ def main(conf: omegaconf.OmegaConf=conf):
     else:
         ema = None
 
-    # Create MeterSet
-    meters = MeterSet({
-        'train_loss_smooth': RunningAvgMeter(window_length=15),
-        'val_loss_smooth': RunningAvgMeter(window_length=15)
-    })
-
     # Create checkpoint manager
     checkpoint_manager = CheckpointManager(
         conf=conf
@@ -218,9 +195,7 @@ def main(conf: omegaconf.OmegaConf=conf):
 
     # Initialize Trainer
     supervised_trainer = SupervisedTrainer(
-        name="my supervised trainer",
-        meter_set=meters,
-        tb_writer=tb_writer,
+        name="supervised trainer",
         conf=conf, 
         model=model, 
         train_loader=train_loader, 
